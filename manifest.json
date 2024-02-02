@@ -1,11 +1,11 @@
 {
-	"id": "obsidian-sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
+	"id": "obsidian-seafile",
+	"name": "Seafile",
+	"version": "0.3.0",
 	"minAppVersion": "0.15.0",
-	"description": "This is a sample plugin for Obsidian. This plugin demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "Obsidian file synchronization plugin using Seafile.",
+	"author": "conql",
+	"authorUrl": "https://github.com/conql",
+	"fundingUrl": "https://github.com/conql",
 	"isDesktopOnly": false
 }

@@ -8,15 +8,16 @@
 # npm
 node_modules
 
-# Don't include the compiled main.js file in the repo.
-# They should be uploaded to GitHub releases instead.
-main.js
+# Don't include the compiled dist folder
+dist/
 
 # Exclude sourcemaps
 *.map
 
-# obsidian
-data.json
-
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Exclude test vault
+vault/*
+!vault/.obsidian/
+!vault/.obsidian/plugins/hotreload/
