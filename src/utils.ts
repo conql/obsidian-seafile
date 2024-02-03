@@ -1,0 +1,263 @@
+import { arrayBufferToHex } from "obsidian";
+import pThrottle from "p-throttle";
+import { Commit, SeafFs } from "./server";
+
+export const Path = require("path-browserify").posix;
+
+export class FormData {
+    private boundary: string;
+    private data: any[];
+
+    constructor() {
+        this.boundary = crypto.randomUUID();
+        this.data = []
+    }
+
+    append(name: string, value: string | ArrayBuffer | Buffer, filename?: string): void {
+        if (this.data.length > 0) {
+            this.data.push(`\r\n`)
+        }
+        this.data.push(`--${this.boundary}\r\n`)
+        this.data.push(`Content-Disposition: form-data; name="${name}"`)
+        if (filename) {
+            this.data.push(`; filename="${filename}"`)
+        }
+        this.data.push(`\r\n\r\n`)
+
+        this.data.push(value)
+    }
+
+    getArrayBuffer(): Promise<ArrayBuffer> {
+        this.data.push(`\r\n--${this.boundary}--\r\n`)
+        return new Blob(this.data).arrayBuffer()
+    }
+
+    getContentType(): string {
+        return `multipart/form-data; boundary=${this.boundary}`
+    }
+
+}
+
+type Func<T extends unknown[], V> = (...args: [...T]) => Promise<V>;
+export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLimit: number): Func<T, V> {
+    let cache: Map<string, V | Promise<V>> = new Map(), cacheSize = 0;
+    let keysQueue: Set<string> = new Set();
+
+    return async (...args: [...T]): Promise<V> => {
+        const key = JSON.stringify(args);
+
+        if (cache.has(key)) { // cache hit
+            let value = cache.get(key);
+            if (value)
+                return value;
+        }
+
+        // set result to cache first, to avoid duplicate requests
+        let promise = fn(...args);
+        cache.set(key, promise);
+        cacheSize++;
+
+        let result: V;
+        try {
+            result = await promise;
+            cache.set(key, result);
+        }
+        catch (e) {
+            cache.delete(key);
+            cacheSize--;
+            throw e;
+        }
+
+        if (keysQueue.has(key)) keysQueue.delete(key);
+        keysQueue.add(key);
+
+        if (cacheSize > cacheLimit) {
+            let key = keysQueue.values().next().value;
+            keysQueue.delete(key);
+            cache.delete(key);
+            cacheSize--;
+        }
+
+        return result;
+    }
+}
+
+export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>, limit: number, interval: number, batchSize: number) {
+    type callback = { resolve: (value: T | undefined) => void, reject: (reason: any) => void };
+    let taskQueue: Map<K, { callback: callback, stack: string }[]> = new Map();
+    const throttled = pThrottle({ limit, interval })(async () => {
+
+
+        // Take the first batchSize keys from the queue
+        // append them to the tasks
+        let keys = Array.from(taskQueue.keys()).slice(0, batchSize);
+        if (keys.length == 0) return;
+
+        let tasks: Map<K, { callback: callback, stack: string }[]> = new Map();
+
+        for (let key of keys) {
+            tasks.set(key, taskQueue.get(key)!);
+            taskQueue.delete(key);
+        }
+
+        let results;
+        try {
+            results = await packFunc(keys);
+            if (!results) throw new Error("packFunc returned undefined");
+        }
+        catch (e) {
+            // packFunc failed, reject all tasks
+            for (let [key, task] of tasks) {
+                for (let cb of task) {
+                    e.stack = e.stack + cb.stack;
+                    cb.callback.reject(e);
+                }
+            }
+            return;
+        }
+
+        // Resolve all tasks
+        for (let [key, task] of tasks) {
+            let result = results.get(key);
+            if (!result) {
+                for (let cb of task) {
+                    cb.callback.resolve(undefined);
+                }
+            }
+            else {
+                for (let cb of task) {
+                    cb.callback.resolve(result);
+                }
+            }
+        }
+    });
+
+    return (key: K): Promise<T | undefined> => {
+        let stack = new Error().stack ?? "";
+        return new Promise<T | undefined>((resolve, reject) => {
+            if (!taskQueue.has(key)) taskQueue.set(key, []);
+            taskQueue.get(key)!.push({ callback: { resolve, reject }, stack: stack });
+            throttled();
+        });
+    }
+}
+
+
+export async function getUniqueLocalPath(path: string) {
+    let baseDir = Path.dirname(path);
+    let ext = Path.extname(path);
+    let fileName = Path.basename(path).slice(0, -ext.length);
+
+    let i = 0;
+    while (await app.vault.adapter.exists(path)) {
+        i++;
+        path = `${baseDir}/${fileName}(${i})${ext}`;
+    }
+
+    path = path.replace(/^\/+/g, '');
+    return path;
+}
+
+export function strcmp(str1: string, str2: string) {
+    return ((str1 == str2) ? 0 : ((str1 > str2) ? 1 : -1));
+}
+
+export function sha1(data: ArrayBuffer | string) {
+    if (typeof data == "string") {
+        data = new TextEncoder().encode(data);
+    }
+    return crypto.subtle.digest("SHA-1", data).then(hash => {
+        return Array.from(new Uint8Array(hash))
+            .map(b => b.toString(16).padStart(2, "0")).join("");
+    });
+}
+
+export function seafileStringify(obj: any) {
+    // sort keys
+    const sortedObj = Object.keys(obj).sort(this.strcmp).reduce((result, key) => {
+        result[key] = obj[key];
+        return result;
+    }, {} as any);
+
+    return JSON.stringify(sortedObj).replace(/:/g, ": ").replace(/,/g, ", ");
+}
+
+export async function computeFsId(fs: SeafFs): Promise<string> {
+    delete (fs as any).fsId;
+    let str = seafileStringify(fs);
+    let fsId = await sha1(str);
+    return fsId;
+}
+
+export async function computeCommitId(commit: Commit): Promise<string> {
+    const encoder = new TextEncoder();
+
+    const rootIdBytes = encoder.encode(commit.root_id + "\0");
+    const creatorBytes = encoder.encode(commit.creator + "\0");
+    const creatorNameBytes = commit.creator_name ? encoder.encode(commit.creator_name + "\0") : new Uint8Array();
+    const descriptionBytes = encoder.encode(commit.description + "\0");
+    const ctimeBytes = new DataView(new ArrayBuffer(8));
+    ctimeBytes.setBigInt64(0, BigInt(commit.ctime), false);
+
+    const data = new Uint8Array([
+        ...rootIdBytes,
+        ...creatorBytes,
+        ...creatorNameBytes,
+        ...descriptionBytes,
+        ...new Uint8Array(ctimeBytes.buffer)
+    ]);
+
+    const digest = await crypto.subtle.digest('SHA-1', data);
+    const commitId = arrayBufferToHex(digest)
+    return commitId;
+}
+
+export async function computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {
+    let stat = await app.vault.adapter.stat(localPath);
+    if (!stat) throw new Error(`File '${localPath}' does not exist.`);
+    if (stat.type != "file") throw new Error(`Path '${localPath}' is not a file.`);
+
+    if (stat.size == 0) {
+        return {};
+    }
+
+    // if size > 50MB, warn user
+    if (stat.size > 50 * 1024 * 1024) {
+        console.warn(`File '${localPath}' is larger than 50MB. This may take a while or even crash obsidian.`);
+    }
+
+    let blocks: Record<string, ArrayBuffer> = {};
+    let buffer = await app.vault.adapter.readBinary(localPath);
+    let blockSize = 8 * 1024 * 1024; // 8MB
+    let numBlocks = Math.ceil(stat.size / blockSize);
+    for (let i = 0; i < numBlocks; i++) {
+        let block = buffer.slice(i * blockSize, (i + 1) * blockSize);
+        let hash = await sha1(block);
+        blocks[hash] = block;
+    }
+
+    return blocks;
+}
+
+// Faster way to convert an array buffer to a base64 string
+export function arrayBufferToBase64(buffer: ArrayBuffer) {
+    return new Promise<string>((resolve, reject) => {
+        let blob = new Blob([buffer], { type: 'application/octet-binary' });
+        let fileReader = new FileReader();
+        fileReader.onload = function () {
+            let dataUrl = fileReader.result;
+            if (typeof dataUrl !== 'string')
+                return reject(new Error("dataUrl is not a string"));
+            let base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+            resolve(base64);
+        };
+        fileReader.readAsDataURL(blob);
+    });
+}
+
+export function concatTypedArrays(a: Uint8Array, b: Uint8Array): Uint8Array {
+    const result = new Uint8Array(a.length + b.length);
+    result.set(a, 0);
+    result.set(b, a.length);
+    return result;
+}

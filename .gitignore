@@ -21,3 +21,7 @@ dist/
 vault/*
 !vault/.obsidian/
 !vault/.obsidian/plugins/hotreload/
+
+
+# Exclude test env setup
+src/test/env.setup.js
