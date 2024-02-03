@@ -1,14 +1,13 @@
-import { describe, expect, jest, test } from '@jest/globals';
-import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
-import Server, { Commit, RequestParam } from '../server';
-import Filesystem from '../filesystem';
-import * as env from "./env";
+import { describe, jest, test } from '@jest/globals';
+import Storage from '../storage';
+import Server, { Commit } from '../server';
 import * as utils from "../utils";
+import * as env from "./env";
 
-jest.mock("../filesystem");
+jest.mock("../storage");
 
 describe('Server', () => {
-    let server = new Server(env.host, env.repoName, env.account, env.password, env.deviceName, env.deviceId, new Filesystem());
+    let server = new Server(env.host, env.repoName, env.account, env.password, env.deviceName, env.deviceId, new Storage());
 
     test('Login', async () => {
         await server.login();

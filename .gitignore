@@ -25,3 +25,6 @@ vault/*
 
 # Exclude test env setup
 src/test/env.setup.js
+
+temp
+temp*.json

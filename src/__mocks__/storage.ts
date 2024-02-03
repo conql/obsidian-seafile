@@ -2,8 +2,8 @@ import * as fs from 'fs/promises';
 import { DataWriteOptions, Stat } from "obsidian"; // Define these types according to your needs
 import * as utils from "../utils";
 
-export default class Filesystem {
-    private cwdPath: string = utils.Path.join(process.cwd(), "vault");
+export default class Storage {
+    private cwdPath: string = utils.Path.join(process.cwd(), "temp");
 
     private resolvePath(filePath: string): string {
         return utils.Path.join(this.cwdPath, filePath);
@@ -34,9 +34,9 @@ export default class Filesystem {
         }
     }
 
-    public async append(filePath: string, data: ArrayBuffer | string, options?: DataWriteOptions): Promise<void> {
+    public async append(filePath: string, data: DataView | string, options?: DataWriteOptions): Promise<void> {
         filePath = this.resolvePath(filePath);
-        const buffer = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data);
+        const buffer = typeof data === 'string' ? data : Buffer.from(data.buffer);
         await fs.appendFile(filePath, buffer);
         if (options?.mtime) {
             await this.updateModificationTime(filePath, new Date(options.mtime));
@@ -56,6 +56,18 @@ export default class Filesystem {
         } catch {
             return null;
         }
+    }
+    public async list(path: string): Promise<string[]> {
+        return await fs.readdir(this.resolvePath(path));
+    }
+    public async remove(path: string) {
+        await fs.rm(this.resolvePath(path));
+    }
+    public async rmdir(path: string, recursive: boolean) {
+        await fs.rm(this.resolvePath(path), { recursive });
+    }
+    public async mkdir(path: string) {
+        await fs.mkdir(this.resolvePath(path));
     }
 
     async computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {

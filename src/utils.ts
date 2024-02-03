@@ -1,4 +1,4 @@
-import { arrayBufferToHex } from "obsidian";
+import { Stat, arrayBufferToHex } from "obsidian";
 import pThrottle from "p-throttle";
 import { Commit, SeafFs } from "./server";
 
@@ -143,20 +143,20 @@ export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>,
 }
 
 
-export async function getUniqueLocalPath(path: string) {
-    let baseDir = Path.dirname(path);
-    let ext = Path.extname(path);
-    let fileName = Path.basename(path).slice(0, -ext.length);
+// export async function getUniqueLocalPath(path: string) {
+//     let baseDir = Path.dirname(path);
+//     let ext = Path.extname(path);
+//     let fileName = Path.basename(path).slice(0, -ext.length);
 
-    let i = 0;
-    while (await app.vault.adapter.exists(path)) {
-        i++;
-        path = `${baseDir}/${fileName}(${i})${ext}`;
-    }
+//     let i = 0;
+//     while (await app.vault.adapter.exists(path)) {
+//         i++;
+//         path = `${baseDir}/${fileName}(${i})${ext}`;
+//     }
 
-    path = path.replace(/^\/+/g, '');
-    return path;
-}
+//     path = path.replace(/^\/+/g, '');
+//     return path;
+// }
 
 export function strcmp(str1: string, str2: string) {
     return ((str1 == str2) ? 0 : ((str1 > str2) ? 1 : -1));
@@ -174,7 +174,7 @@ export function sha1(data: ArrayBuffer | string) {
 
 export function seafileStringify(obj: any) {
     // sort keys
-    const sortedObj = Object.keys(obj).sort(this.strcmp).reduce((result, key) => {
+    const sortedObj = Object.keys(obj).sort(strcmp).reduce((result, key) => {
         result[key] = obj[key];
         return result;
     }, {} as any);
@@ -212,24 +212,12 @@ export async function computeCommitId(commit: Commit): Promise<string> {
     return commitId;
 }
 
-export async function computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {
-    let stat = await app.vault.adapter.stat(localPath);
-    if (!stat) throw new Error(`File '${localPath}' does not exist.`);
-    if (stat.type != "file") throw new Error(`Path '${localPath}' is not a file.`);
-
-    if (stat.size == 0) {
-        return {};
-    }
-
-    // if size > 50MB, warn user
-    if (stat.size > 50 * 1024 * 1024) {
-        console.warn(`File '${localPath}' is larger than 50MB. This may take a while or even crash obsidian.`);
-    }
+export async function computeBlocks(buffer: ArrayBuffer): Promise<Record<string, ArrayBuffer>> {
+    const size = buffer.byteLength;
 
     let blocks: Record<string, ArrayBuffer> = {};
-    let buffer = await app.vault.adapter.readBinary(localPath);
     let blockSize = 8 * 1024 * 1024; // 8MB
-    let numBlocks = Math.ceil(stat.size / blockSize);
+    let numBlocks = Math.ceil(size / blockSize);
     for (let i = 0; i < numBlocks; i++) {
         let block = buffer.slice(i * blockSize, (i + 1) * blockSize);
         let hash = await sha1(block);
@@ -260,4 +248,11 @@ export function concatTypedArrays(a: Uint8Array, b: Uint8Array): Uint8Array {
     result.set(a, 0);
     result.set(b, a.length);
     return result;
+}
+
+export function splitFirstSlash(path: string) {
+    const firstSlash = path.indexOf("/");
+    if (firstSlash == -1) return [path, ""];
+    const [first, rest] = [path.slice(0, firstSlash), path.slice(firstSlash + 1)];
+    return [first, rest];
 }

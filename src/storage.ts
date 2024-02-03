@@ -1,7 +1,7 @@
 import { DataWriteOptions, Stat } from "obsidian";
 import * as utils from "./utils";
 
-export default class Filesystem {
+export default class Storage {
     public async exists(path: string): Promise<boolean> {
         return false;
     }
@@ -11,13 +11,26 @@ export default class Filesystem {
     public async writeBinary(path: string, data: ArrayBuffer, options: DataWriteOptions) {
         return app.vault.adapter.writeBinary(path, data, options);
     }
-    public async append(path: string, data: ArrayBuffer | String, options: DataWriteOptions) {
+    public async append(path: string, data: DataView | string, options: DataWriteOptions) {
         return app.vault.adapter.append(path, data as unknown as string, options);
     }
     public async stat(path: string): Promise<Stat | null> {
         return app.vault.adapter.stat(path);
     }
-    
+    public async list(path: string): Promise<string[]> {
+        const listedFiles = await app.vault.adapter.list(path);
+        return [...listedFiles.files, ...listedFiles.folders];
+    }
+    public async remove(path: string) {
+        await app.vault.adapter.remove(path);
+    }
+    public async rmdir(path: string, recursive: boolean) {
+        await app.vault.adapter.rmdir(path, recursive);
+    }
+    public async mkdir(path: string) {
+        await app.vault.adapter.mkdir(path);
+    }
+
     async computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {
         let stat = await this.stat(localPath);
         if (!stat) throw new Error(`File '${localPath}' does not exist.`);

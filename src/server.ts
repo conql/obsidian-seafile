@@ -1,6 +1,6 @@
 import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
 import pRetry from "p-retry";
-import Filesystem from './filesystem';
+import Storage from './storage';
 import * as utils from "./utils";
 const pako = require('pako');
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
@@ -109,7 +109,7 @@ export default class Server {
         private host: string, private repoName: string,
         private account: string, private password: string,
         private deviceName: string, private deviceId: string,
-        private fs: Filesystem) {
+        private storage: Storage) {
     }
 
     public async login(): Promise<void> {
@@ -269,6 +269,18 @@ export default class Server {
         return resp;
     }
 
+    async batchMove(srcParentDir: string, srcDirents: string[], dstParentDir: string) {
+        await this.requestAPIv21({
+            url: `repos/sync-batch-move-item/`,
+            method: 'POST',
+            body: JSON.stringify({
+                src_repo_id: this.repoId, src_parent_dir: srcParentDir, src_dirents: srcDirents,
+                dst_repo_id: this.repoId, dst_parent_dir: dstParentDir
+            }),
+            contentType: 'application/json'
+        });
+    }
+
     async dirExists(path: string): Promise<boolean> {
         try {
             let dirInfo = await this.getDirInfo(path, false);
@@ -361,11 +373,11 @@ export default class Server {
     }
 
     // mtime is in seconds!
-    async downloadFile(localPath: string, fsId: string, overwrite: boolean, mtime: number | undefined = undefined, progressCallback: (localPath: string, fsId: string, current: number, total: number) => Promise<boolean>): Promise<void> {
+    async downloadFile(localPath: string, fsId: string, overwrite: boolean, mtime: number | undefined = undefined, progressCallback?: (localPath: string, fsId: string, current: number, total: number) => Promise<boolean>): Promise<void> {
         if (!progressCallback)
             progressCallback = async () => true;
 
-        if (await this.fs.exists(localPath) && !overwrite) {
+        if (await this.storage.exists(localPath) && !overwrite) {
             throw new Error("Local file already exists and overwrite is false when downloading.");
         }
 
@@ -373,7 +385,7 @@ export default class Server {
             mtime = mtime * 1000;
 
         if (fsId == ZeroFs) {
-            this.fs.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
+            this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
             return;
         }
 
@@ -384,13 +396,13 @@ export default class Server {
             throw new Error("Invalid file info from seafile server when downloading. No block ids.");
 
 
-        await this.fs.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
+        await this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
 
 
         for (let i = 0; i < fs.block_ids.length; i++) {
             let blockId = fs.block_ids[i]!;
             let block = await this.getBlock(blockId);
-            await this.fs.append(localPath, new DataView(block) as unknown as string, { mtime: mtime })
+            await this.storage.append(localPath, new DataView(block) as unknown as string, { mtime: mtime })
 
             if (!(await progressCallback(localPath, fsId, i + 1, fs.block_ids.length))) {
                 throw new Error("Download cancelled.");
@@ -398,12 +410,13 @@ export default class Server {
         }
 
         // Update mtime
-        await this.fs.append(localPath, "", { mtime: mtime });
+        await this.storage.append(localPath, "", { mtime: mtime });
 
         // Check file integrity
-        const stat = await this.fs.stat(localPath);
+        const stat = await this.storage.stat(localPath);
         if (!stat) throw new Error(`File '${localPath}' does not exist. Download failed.`);
-        if (stat.size != fs.size) throw new Error(`File '${localPath}' size does not match. Download failed.`);
+        if (stat.size != fs.size)
+            throw new Error(`File '${localPath}' size does not match. Download failed.`);
     }
 
 
@@ -418,6 +431,16 @@ export default class Server {
         return resp as Commit;
     }, 1000)
 
+    async getCommitRoot(commit: string): Promise<DirSeafDirent> {
+        const commitInfo = await this.getCommitInfo(commit);
+        const rootFs = await this.getFs(commitInfo.root_id);
+        return {
+            id: commitInfo.root_id,
+            mode: MODE_DIR,
+            mtime: commitInfo.ctime,
+            name: "",
+        }
+    }
     async createCommit(root_id: string, description: string, parent_id: string, ctime?: number): Promise<Commit> {
         if (!ctime) ctime = Math.floor(Date.now() / 1000);
 
