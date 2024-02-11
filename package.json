@@ -13,11 +13,13 @@
   "license": "MIT",
   "devDependencies": {
     "@jest/globals": "^29.7.0",
+    "@types/gitignore-parser": "^0.0.3",
     "@types/node": "^16.11.6",
     "@typescript-eslint/eslint-plugin": "5.29.0",
     "@typescript-eslint/parser": "5.29.0",
     "builtin-modules": "3.3.0",
     "esbuild": "0.17.3",
+    "gitignore-parser": "^0.0.2",
     "jest": "^29.7.0",
     "node-fetch": "^3.3.2",
     "obsidian": "latest",

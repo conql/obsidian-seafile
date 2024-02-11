@@ -19,6 +19,9 @@ devDependencies:
   '@jest/globals':
     specifier: ^29.7.0
     version: 29.7.0
+  '@types/gitignore-parser':
+    specifier: ^0.0.3
+    version: 0.0.3
   '@types/node':
     specifier: ^16.11.6
     version: 16.18.79
@@ -34,6 +37,9 @@ devDependencies:
   esbuild:
     specifier: 0.17.3
     version: 0.17.3
+  gitignore-parser:
+    specifier: ^0.0.2
+    version: 0.0.2
   jest:
     specifier: ^29.7.0
     version: 29.7.0(@types/node@16.18.79)
@@ -1003,6 +1009,10 @@ packages:
     resolution: {integrity: sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw==}
     dev: true
 
+  /@types/gitignore-parser@0.0.3:
+    resolution: {integrity: sha512-sbdu1sG2pQcwjEYWTsX78OqJo5pKnonwC4FV3m2JeQRE2xYb3q0icHHopCHEvpn4uIBuvWBTpJUCJ76ISK24CA==}
+    dev: true
+
   /@types/graceful-fs@4.1.9:
     resolution: {integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==}
     dependencies:
@@ -1929,6 +1939,11 @@ packages:
   /get-stream@6.0.1:
     resolution: {integrity: sha512-ts6Wi+2j3jQjqi70w5AlN8DFnkSwC+MqmxEzdEALB2qXZYV3X/b1CTfgPLGJNMeAWxdPfU8FO1ms3NUfaHCPYg==}
     engines: {node: '>=10'}
+    dev: true
+
+  /gitignore-parser@0.0.2:
+    resolution: {integrity: sha512-X6mpqUv59uWLGD4n3hZ8Cu8KbF2PMWPSFYmxZjdkpm3yOU7hSUYnzTkZI1mcWqchphvqyuz3/BhgBR4E/JtkCg==}
+    engines: {node: '>=0.10.0'}
     dev: true
 
   /glob-parent@5.1.2:

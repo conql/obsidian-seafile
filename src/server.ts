@@ -1,6 +1,5 @@
 import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
 import pRetry from "p-retry";
-import Storage from './storage';
 import * as utils from "./utils";
 const pako = require('pako');
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
@@ -108,8 +107,11 @@ export default class Server {
     public constructor(
         private host: string, private repoName: string,
         private account: string, private password: string,
-        private deviceName: string, private deviceId: string,
-        private storage: Storage) {
+        private deviceName: string, private deviceId: string) {
+    }
+
+    public getAccount() {
+        return this.account;
     }
 
     public async login(): Promise<void> {
@@ -372,52 +374,52 @@ export default class Server {
         return await response
     }
 
-    // mtime is in seconds!
-    async downloadFile(localPath: string, fsId: string, overwrite: boolean, mtime: number | undefined = undefined, progressCallback?: (localPath: string, fsId: string, current: number, total: number) => Promise<boolean>): Promise<void> {
-        if (!progressCallback)
-            progressCallback = async () => true;
+    // // mtime is in seconds!
+    // async downloadFile(localPath: string, fsId: string, overwrite: boolean, mtime: number | undefined = undefined, progressCallback?: (localPath: string, fsId: string, current: number, total: number) => Promise<boolean>): Promise<void> {
+    //     if (!progressCallback)
+    //         progressCallback = async () => true;
 
-        if (await this.storage.exists(localPath) && !overwrite) {
-            throw new Error("Local file already exists and overwrite is false when downloading.");
-        }
+    //     if (await this.storage.exists(localPath) && !overwrite) {
+    //         throw new Error("Local file already exists and overwrite is false when downloading.");
+    //     }
 
-        if (mtime)
-            mtime = mtime * 1000;
+    //     if (mtime)
+    //         mtime = mtime * 1000;
 
-        if (fsId == ZeroFs) {
-            this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
-            return;
-        }
+    //     if (fsId == ZeroFs) {
+    //         this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
+    //         return;
+    //     }
 
-        let fs: FileSeafFs = await this.getFs(fsId) as FileSeafFs;
-        if (!fs) throw new Error('Cannot get file info from seafile server when downloading.');
+    //     let fs: FileSeafFs = await this.getFs(fsId) as FileSeafFs;
+    //     if (!fs) throw new Error('Cannot get file info from seafile server when downloading.');
 
-        if (!fs.block_ids)
-            throw new Error("Invalid file info from seafile server when downloading. No block ids.");
-
-
-        await this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
+    //     if (!fs.block_ids)
+    //         throw new Error("Invalid file info from seafile server when downloading. No block ids.");
 
 
-        for (let i = 0; i < fs.block_ids.length; i++) {
-            let blockId = fs.block_ids[i]!;
-            let block = await this.getBlock(blockId);
-            await this.storage.append(localPath, new DataView(block) as unknown as string, { mtime: mtime })
+    //     await this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
 
-            if (!(await progressCallback(localPath, fsId, i + 1, fs.block_ids.length))) {
-                throw new Error("Download cancelled.");
-            }
-        }
 
-        // Update mtime
-        await this.storage.append(localPath, "", { mtime: mtime });
+    //     for (let i = 0; i < fs.block_ids.length; i++) {
+    //         let blockId = fs.block_ids[i]!;
+    //         let block = await this.getBlock(blockId);
+    //         await this.storage.append(localPath, new DataView(block) as unknown as string, { mtime: mtime })
 
-        // Check file integrity
-        const stat = await this.storage.stat(localPath);
-        if (!stat) throw new Error(`File '${localPath}' does not exist. Download failed.`);
-        if (stat.size != fs.size)
-            throw new Error(`File '${localPath}' size does not match. Download failed.`);
-    }
+    //         if (!(await progressCallback(localPath, fsId, i + 1, fs.block_ids.length))) {
+    //             throw new Error("Download cancelled.");
+    //         }
+    //     }
+
+    //     // Update mtime
+    //     await this.storage.append(localPath, "", { mtime: mtime });
+
+    //     // Check file integrity
+    //     const stat = await this.storage.stat(localPath);
+    //     if (!stat) throw new Error(`File '${localPath}' does not exist. Download failed.`);
+    //     if (stat.size != fs.size)
+    //         throw new Error(`File '${localPath}' size does not match. Download failed.`);
+    // }
 
 
 

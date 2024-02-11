@@ -1,13 +1,11 @@
 import { describe, jest, test } from '@jest/globals';
-import Storage from '../storage';
 import Server, { Commit } from '../server';
 import * as utils from "../utils";
 import * as env from "./env";
 
-jest.mock("../storage");
-
 describe('Server', () => {
-    let server = new Server(env.host, env.repoName, env.account, env.password, env.deviceName, env.deviceId, new Storage());
+    
+    let server = new Server(env.host, env.repoName, env.account, env.password, env.deviceName, env.deviceId);
 
     test('Login', async () => {
         await server.login();
