@@ -1,8 +1,9 @@
 import { Stat, arrayBufferToHex } from "obsidian";
 import pThrottle from "p-throttle";
 import { Commit, SeafFs } from "./server";
+import { PlatformPath } from "path/posix";
 
-export const Path = require("path-browserify").posix;
+export const Path = (require("path-browserify").posix) as PlatformPath;
 
 export class FormData {
     private boundary: string;

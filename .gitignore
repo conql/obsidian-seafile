@@ -23,8 +23,8 @@ vault/*
 !vault/.obsidian/plugins/hotreload/
 
 
-# Exclude test env setup
-src/test/env.setup.js
+# Exclude test environmental variables
+src/test/env.ts
 
 temp
 temp*.json
