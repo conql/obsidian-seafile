@@ -17,9 +17,17 @@
       "ES5",
       "ES6",
       "ES7"
+    ],
+    "plugins": [
+      {
+        "name": "typescript-plugin-css-modules",
+        "options": {
+          "classnameTransform": "camelCaseOnly"
+        }
+      }
     ]
   },
   "include": [
-    "src/**/*.ts"
+    "src"
   ]
 }

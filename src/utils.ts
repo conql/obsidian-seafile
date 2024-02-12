@@ -257,3 +257,16 @@ export function splitFirstSlash(path: string) {
     const [first, rest] = [path.slice(0, firstSlash), path.slice(firstSlash + 1)];
     return [first, rest];
 }
+
+export let debug: Console = {} as any;
+for (let key in console) {
+    if (typeof (console as any)[key] == "function") {
+        (debug as any)[key] = (console as any)[key].bind(console);
+    }
+}
+
+export function disableDebug() {
+    for (let key in debug) {
+        (debug as any)[key] = () => { };
+    }
+}

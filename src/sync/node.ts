@@ -1,8 +1,7 @@
-import { FileSeafDirent, MODE_FILE, SeafDirent, SeafFs } from "./server";
-import * as utils from "./utils";
-import { EventSource } from "./event_source";
-import { DataAdapter } from "obsidian";
-import { DATA_DIR } from "./config";
+import { DATA_DIR } from "../config";
+import { MODE_FILE, SeafDirent, SeafFs } from "../server";
+import * as utils from "../utils";
+import { debug } from "../utils";
 
 export type STATE_DOWNLOAD = {
     type: "download",
@@ -22,30 +21,31 @@ export type STATE_SYNC = {
 export type STATE_INIT = {
     type: "init"
 }
+export type STATE_DELETE = {
+    type: "delete"
+}
 
-export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC;
+export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC | STATE_DELETE;
 
-export type SyncNodeListener = (node: SyncNode) => void;
+export type SyncStateChangedListener = (node: SyncNode) => void;
 
 const adapter = app.vault.adapter;
 
 export class SyncNode {
-    private readonly path: string;
+    public readonly path: string;
     private children: Record<string, SyncNode> = {};
     private _prev?: SeafDirent;
     public prevDirty = true; // prev means the last synced state
     public next?: SeafDirent;
     public nextDirty = true; // next means the pending upload state
 
-    onChildrenChanged = new EventSource<SyncNodeListener>();
-    onStateChanged = new EventSource<SyncNodeListener>();
-
     private constructor(
         public readonly name: string,
+        public onStateChanged: SyncStateChangedListener,
         public readonly parent?: SyncNode,
     ) {
-        this.state = { type: "init" };
         this.path = this.parent ? this.parent.path + "/" + this.name : this.name;
+        this.state = { type: "init" };
     }
 
     private _state: SyncState;
@@ -56,69 +56,49 @@ export class SyncNode {
         this._state = new Proxy(value, {
             set: (target, prop, value) => {
                 Object.assign(target, { [prop]: value });
-                this.onStateChanged.raise(this);
+                this.onStateChanged?.(this);
                 return true;
             }
         });
-        this.onStateChanged.raise(this);
+        this.onStateChanged?.(this);
     }
 
-    /// Load the nodes from disk
-    static async init(): Promise<SyncNode> {
-        const loadPath = async (path: string, parent?: SyncNode): Promise<SyncNode> => {
-            let metadata: SeafDirent;
-            try {
-                metadata = JSON.parse(await adapter.read(path + "/" + "metadata.json"));
-                const node = new SyncNode(metadata.name, parent); // Use dirent name instead of path name
-                node.prev = metadata;
-                node.prevDirty = true;
-
-                const children = await adapter.list(path);
-
-                for (let childName of children.folders) {
-                    const child = await loadPath(path + "/" + childName, node);
-                    node.addChild(child);
-                }
-
-                for (let childName of children.files) {
-                    try {
-                        const childPrev: SeafDirent = JSON.parse(await adapter.read(path + "/" + childName));
-                        const child = new SyncNode(childPrev.name, node);
-                        child.prev = childPrev;
-                        child.prevDirty = true;
-                        node.addChild(child);
-                    }
-                    catch (e) {
-                        // console.error(`Cannot load metadata for ${path + childName}, parent: ${parent?.name}`);
-                        throw e;
-                    }
-                }
-
-                return node;
-            }
-            catch (e) {
-                // console.error(`Cannot load metadata for ${path}, parent: ${parent?.name}`);
-                throw e;
-            }
-        }
-
+    public static async loadPath(onStateChanged: SyncStateChangedListener, realPath: string = DATA_DIR, parent?: SyncNode): Promise<SyncNode> {
+        let metadata: SeafDirent;
         try {
-            const root = await loadPath(DATA_DIR);
-            return root;
-        }
-        catch {
-            // Check if rootDataPath exists
-            if (! await adapter.exists(DATA_DIR)) {
-                await adapter.mkdir(DATA_DIR);
+            metadata = JSON.parse(await adapter.read(realPath + "/metadata.json"));
+            const node = new SyncNode(metadata.name, onStateChanged, parent); // Use dirent name instead of path name
+            node.prev = metadata;
+            node.prevDirty = true;
+
+            const children = await adapter.list(realPath);
+
+            for (let childPath of children.folders) {
+                const child = await SyncNode.loadPath(onStateChanged, childPath, node);
+                node.addChild(child);
             }
 
-            const root = new SyncNode("");
-            return root;
+            for (let childPath of children.files) {
+                const childName = utils.Path.basename(childPath);
+                if (childName === "metadata.json") continue;
+                const childPrev: SeafDirent = JSON.parse(await adapter.read(realPath + "/" + childName));
+                const child = new SyncNode(childPrev.name, onStateChanged, node);
+                child.prev = childPrev;
+                child.prevDirty = true;
+                node.addChild(child);
+            }
+
+            return node;
+        }
+        catch (e) {
+            const path = realPath.replace(DATA_DIR, "");
+            debug.warn(`Cannot load metadata for "${path}", parent: ${parent?.name}`, e);
+            return new SyncNode(path.split("/").pop() || "", onStateChanged, parent);
         }
     }
 
     private async savePrev() {
-        const escapedPath = this.path.replace(/metadata.json$/g, "#metadata.json");
+        const escapedPath = this.path.replace(/metadata.json$/, "#metadata.json");
         const savePath = DATA_DIR + escapedPath;
 
         if (!this.prev) {
@@ -184,11 +164,16 @@ export class SyncNode {
 
     find(path: string): SyncNode | null {
         let found: SyncNode | null = null;
-        this.exec(path, (node) => {
-            found = node;
-            return true;
-        }, "post", false);
-        return found;
+        try {
+            this.exec(path, (node) => {
+                found = node;
+                return true;
+            }, "post", true);
+            return found;
+        }
+        catch {
+            return null;
+        }
     }
 
     setDirty(path: string) {
@@ -204,25 +189,22 @@ export class SyncNode {
 
     private addChild(node: SyncNode) {
         this.children[node.name] = node;
-        this.onChildrenChanged.raise(node);
     }
 
-    createChild(name: string) {
-        const child = new SyncNode(name, this);
+    createChild(name: string, onStateChanged: SyncStateChangedListener) {
+        const child = new SyncNode(name, onStateChanged, this);
         this.addChild(child);
         return child;
     }
 
     removeChild(node: SyncNode) {
         if (this.children.hasOwnProperty(node.name)) {
-            this.onChildrenChanged.raise(node);
             delete this.children[node.name];
         }
     }
 
     clearChildren() {
         Object.keys(this.children).forEach((name) => {
-            this.onChildrenChanged.raise(this.children[name]);
             delete this.children[name];
         });
     }
@@ -269,6 +251,7 @@ export class SyncNode {
             await this.setPrevAsync(undefined, true);
         }
 
+        this.state = { "type": "delete" }
     }
 
     toJson() {
