@@ -1,13 +1,9 @@
 import * as fs from 'fs/promises';
 import fetch from 'node-fetch';
-import { App, DataAdapter, DataWriteOptions, ListedFiles, Stat } from "obsidian"
+import { App, DataAdapter, DataWriteOptions, ListedFiles, RequestUrlParam, RequestUrlResponsePromise, Stat } from "obsidian"
 import { PlatformPath } from 'path/posix';
 export const Path = (require("path-browserify").posix) as PlatformPath;
 
-/**
- * Similar to `fetch()`, request a URL using HTTP/HTTPS, without any CORS restrictions.
- * @public
- */
 export function requestUrl(request: RequestUrlParam | string): RequestUrlResponsePromise {
     if (typeof request === "string") request = { url: request };
     if (request.body && typeof request.body !== "string") request.body = Buffer.from(request.body as ArrayBuffer)
@@ -43,52 +39,14 @@ export function requestUrl(request: RequestUrlParam | string): RequestUrlRespons
     return ret;
 }
 
-/** @public */
-export interface RequestUrlParam {
-    /** @public */
-    url: string;
-    /** @public */
-    method?: string;
-    /** @public */
-    contentType?: string;
-    /** @public */
-    body?: string | ArrayBuffer;
-    /** @public */
-    headers?: Record<string, string>;
-    /**
-     * Whether to throw an error when the status code is 400+
-     * Defaults to true
-     * @public
-     */
-    throw?: boolean;
+export function arrayBufferToHex(data: ArrayBuffer): string {
+    // Create a view for the ArrayBuffer
+    const view = new Uint8Array(data);
+    // Convert each byte in the ArrayBuffer to its hexadecimal representation
+    // and join them together to form the final string
+    const hex = Array.from(view).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    return hex;
 }
-
-/** @public */
-export interface RequestUrlResponse {
-    /** @public */
-    status: number;
-    /** @public */
-    headers: Record<string, string>;
-    /** @public */
-    arrayBuffer: ArrayBuffer;
-    /** @public */
-    json: any;
-    /** @public */
-    text: string;
-}
-
-/** @public */
-export interface RequestUrlResponsePromise extends Promise<RequestUrlResponse> {
-    /** @public */
-    arrayBuffer: Promise<ArrayBuffer>;
-    /** @public */
-    json: Promise<any>;
-    /** @public */
-    text: Promise<string>;
-}
-
-
-
 
 class MockDataAdapter implements DataAdapter {
     private cwdPath: string = Path.join(process.cwd(), "temp")
@@ -135,18 +93,21 @@ class MockDataAdapter implements DataAdapter {
         }
         return listedFiles;
     }
-    read(normalizedPath: string): Promise<string> {
+    async read(normalizedPath: string): Promise<string> {
         normalizedPath = this.resolvePath(normalizedPath);
-        return fs.readFile(normalizedPath, 'utf-8');
+        return await fs.readFile(normalizedPath, 'utf-8');
     }
     async readBinary(normalizedPath: string): Promise<ArrayBuffer> {
         normalizedPath = this.resolvePath(normalizedPath);
         const buffer = await fs.readFile(normalizedPath);
         return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
     }
-    write(normalizedPath: string, data: string, options?: DataWriteOptions | undefined): Promise<void> {
+    async write(normalizedPath: string, data: string, options?: DataWriteOptions | undefined): Promise<void> {
         normalizedPath = this.resolvePath(normalizedPath);
-        return fs.writeFile(normalizedPath, data);
+        await fs.writeFile(normalizedPath, data);
+        if (options?.mtime) {
+            await this.updateModificationTime(normalizedPath, new Date(options.mtime));
+        }
     }
     async writeBinary(normalizedPath: string, data: ArrayBuffer, options?: DataWriteOptions | undefined): Promise<void> {
         normalizedPath = this.resolvePath(normalizedPath);

@@ -13,7 +13,7 @@ describe('Server', () => {
 
     let headCommitId = "";
     test('Get Head commit Id', async () => {
-        headCommitId = await server.getHeadCommit();
+        headCommitId = await server.getHeadCommitId();
     });
 
     let headCommit: Commit;

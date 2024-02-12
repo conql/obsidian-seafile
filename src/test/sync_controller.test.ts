@@ -1,29 +1,53 @@
 import { describe, expect, jest, test } from '@jest/globals';
-import Server, { Commit } from '../server';
+import Server, { Commit, DirInfo } from '../server';
 import fs from 'fs'
 import * as env from "./env";
 import { SyncController } from '../sync_controller';
 import { SyncNode } from '../sync_node';
+import { Path } from '../utils';
+import { MockPlugin } from './mock_plugin';
 
 describe("Basic test", () => {
     const server = new Server(env.host, env.repoName, env.account, env.password, env.deviceName, env.deviceId);
     let sync: SyncController;
-    let initCommitId = "";
+    const initCommitId = "42ab1c5842fe43aca325aad21a53bf4a113ed87a";
+    let localHead = "";
     let rootNode: SyncNode;
+    let uploads = new Set<SyncNode>();
+    let dirInfo: DirInfo[];
 
-    const pullHead = async () => {
-        const dirInfo = await server.getDirInfo("", true);
+    const pullHead = async (upload = false) => {
+        dirInfo = await server.getDirInfo("", true);
         fs.writeFileSync("temp_remote.json", JSON.stringify(dirInfo, null, 4));
 
-        const remoteHead = await server.getHeadCommit();
+        const remoteHead = await server.getHeadCommitId();
         const remoteRoot = await server.getCommitRoot(remoteHead);
-        await sync.pull("", rootNode, remoteRoot);
+        uploads.clear();
+        await sync.pull(uploads, "", rootNode, remoteRoot);
+        localHead = remoteHead;
 
         fs.writeFileSync("temp_local.json", JSON.stringify(rootNode.toJson(), null, 4));
 
-        expect(rootNode.prev!.id).toBe(remoteRoot.id);
-        expect(rootNode.prevDirty).toBeFalsy();
-        expect(rootNode.state.type).toBe("sync");
+        if (!upload) {
+            expect(rootNode.next).toBeUndefined();
+            expect(rootNode.prev!.id).toBe(remoteRoot.id);
+            expect(rootNode.prevDirty).toBeFalsy();
+            expect(rootNode.state.type).toBe("sync");
+        }
+    }
+
+    const findRandomFile = (): string => {
+        const files = dirInfo.filter(info => info.type == "file");
+        const index = Math.floor(Math.random() * files.length);
+        const file = files[index];
+        return Path.join(file.parent_dir, file.name)
+    }
+
+    const findRandomFolder = (): string => {
+        const folders = dirInfo.filter(info => info.type == "dir");
+        const index = Math.floor(Math.random() * folders.length);
+        const folder = folders[index];
+        return Path.join(folder.parent_dir, folder.name)
     }
 
     test('Preparation', async () => {
@@ -33,28 +57,55 @@ describe("Basic test", () => {
         fs.mkdirSync("temp");
 
         await server.login();
-        initCommitId = await server.getHeadCommit();
+        await server.revertToCommit(initCommitId);
         rootNode = await SyncNode.init();
-        sync = new SyncController(server, rootNode);
+        sync = new SyncController(15000, server, rootNode, ".obsidian");
     })
 
     test('Pull initial', async () => {
         await pullHead();
-        expect(sync.uploads.size).toBe(0);
-    }, 1000000);
+    }, 10000);
 
-    test('Pull remote batch move', async () => {
-        await server.batchMove("/abc", ["ttt"], "/asd");
-        const uploads = await pullHead();
-        expect(sync.uploads.size).toBe(0);
+    test('Load SyncNode from disk', async () => {
+        const node = await SyncNode.init();
+        expect(node.prev?.id).toBe(rootNode.prev?.id);
+        const path = findRandomFile();
+        expect(node.find(path)!.prev?.id).toBe(rootNode.find(path)!.prev?.id);
     });
 
-    // test('Push local modify', async () => {
-    //     await fs.writeFileSync("/abc/1231.txt", "Hello world!");
+    test('Pull and Push', async () => {
+        // Remote move
+        const srcFolder = findRandomFolder();
+        let dstFolder = findRandomFolder();
+        while (dstFolder.includes(srcFolder)) dstFolder = findRandomFolder();
+        console.log(`Remote moved from ${srcFolder} to ${dstFolder}`);
+        await server.batchMove(Path.dirname(srcFolder), [Path.basename(srcFolder)], dstFolder);
 
-    // });
+        // Local edit
+        const testContent = "Hello world!";
+        const localEditPath = Path.join(dstFolder, "test_local.md");
+        await app.vault.adapter.write(localEditPath, testContent);
+        console.log(`Local edit ${localEditPath}`)
+        sync.notifyChange(localEditPath, "modify");
 
-    test('Revert back', async () => {
-        await server.revertToCommit(initCommitId);
-    });
+        // Remote edit
+        const remoteEditPath = Path.join(dstFolder, "test_remote.md");
+        console.log(`Remote edit ${remoteEditPath}`)
+        await server.uploadFile(remoteEditPath, new TextEncoder().encode(testContent), false);
+
+        console.log("Pulling head")
+        await pullHead(true);
+        
+        console.log("Pushing")
+        localHead = await sync.push(rootNode, uploads, localHead);
+
+        expect(rootNode.state.type).toBe("sync");
+        expect(rootNode.prevDirty).toBeFalsy();
+
+        const localContent = await app.vault.adapter.read(remoteEditPath);
+        expect(localContent).toBe(testContent);
+
+        const remoteContent = new TextDecoder().decode(await server.getFileContent(localEditPath));
+        expect(remoteContent).toBe(testContent);
+    }, 15000);
 })
