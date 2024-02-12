@@ -99,6 +99,19 @@ export interface Repo {
     salt: string;
 }
 
+export interface DirInfo {
+    type: 'dir' | 'file',
+    parent_dir: string,
+    id: string,
+    name: string,
+    mtime: number,
+    permission: 'rw',
+    modifier_email?: string,
+    size?: number,
+    modifier_contact_email?: string,
+    modifier_name?: string,
+}
+
 export default class Server {
     private authToken: string;
     private repoId: string;
@@ -218,18 +231,7 @@ export default class Server {
         return this.getRepoInfo(repoId).then(resp => resp.token);
     }
 
-    async getDirInfo(path: string, recursive = false): Promise<{
-        type: 'dir' | 'file',
-        parent_dir: string,
-        id: string,
-        name: string,
-        mtime: number,
-        permission: 'rw',
-        modifier_email?: string,
-        size?: number,
-        modifier_contact_email?: string,
-        modifier_name?: string,
-    }[]> {
+    async getDirInfo(path: string, recursive = false): Promise<DirInfo[]> {
         path = encodeURIComponent(path);
         let resp = await this.requestAPIv20({ url: `repos/${this.repoId}/dir/?p=${path}&recursive=${recursive ? 1 : 0}` });
         return resp;
@@ -241,7 +243,8 @@ export default class Server {
         return downloadUrl;
     }
 
-    async getFileContentFromLink(fileDownloadLink: string): Promise<ArrayBuffer> {
+    async getFileContent(remotePath: string): Promise<ArrayBuffer> {
+        const fileDownloadLink = await this.getFileDownloadLink(remotePath);
         const downloadResp = await this.request({ url: fileDownloadLink, method: "GET", responseType: "binary", throw: false });
         return await downloadResp.arrayBuffer;
     }
@@ -374,56 +377,7 @@ export default class Server {
         return await response
     }
 
-    // // mtime is in seconds!
-    // async downloadFile(localPath: string, fsId: string, overwrite: boolean, mtime: number | undefined = undefined, progressCallback?: (localPath: string, fsId: string, current: number, total: number) => Promise<boolean>): Promise<void> {
-    //     if (!progressCallback)
-    //         progressCallback = async () => true;
-
-    //     if (await this.storage.exists(localPath) && !overwrite) {
-    //         throw new Error("Local file already exists and overwrite is false when downloading.");
-    //     }
-
-    //     if (mtime)
-    //         mtime = mtime * 1000;
-
-    //     if (fsId == ZeroFs) {
-    //         this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
-    //         return;
-    //     }
-
-    //     let fs: FileSeafFs = await this.getFs(fsId) as FileSeafFs;
-    //     if (!fs) throw new Error('Cannot get file info from seafile server when downloading.');
-
-    //     if (!fs.block_ids)
-    //         throw new Error("Invalid file info from seafile server when downloading. No block ids.");
-
-
-    //     await this.storage.writeBinary(localPath, new ArrayBuffer(0), { mtime: mtime })
-
-
-    //     for (let i = 0; i < fs.block_ids.length; i++) {
-    //         let blockId = fs.block_ids[i]!;
-    //         let block = await this.getBlock(blockId);
-    //         await this.storage.append(localPath, new DataView(block) as unknown as string, { mtime: mtime })
-
-    //         if (!(await progressCallback(localPath, fsId, i + 1, fs.block_ids.length))) {
-    //             throw new Error("Download cancelled.");
-    //         }
-    //     }
-
-    //     // Update mtime
-    //     await this.storage.append(localPath, "", { mtime: mtime });
-
-    //     // Check file integrity
-    //     const stat = await this.storage.stat(localPath);
-    //     if (!stat) throw new Error(`File '${localPath}' does not exist. Download failed.`);
-    //     if (stat.size != fs.size)
-    //         throw new Error(`File '${localPath}' size does not match. Download failed.`);
-    // }
-
-
-
-    async getHeadCommit() {
+    async getHeadCommitId(): Promise<string> {
         let resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/HEAD` });
         return resp.head_commit_id;
     }
@@ -522,7 +476,7 @@ export default class Server {
         const utf8Encoder = new TextEncoder();
         let data = new Uint8Array();
         for (let [fsId, fs] of fsList) {
-            const fsJson = JSON.stringify(fs);
+            const fsJson = utils.seafileStringify(fs);
             const compressed = pako.deflate(fsJson);
             const idData = utf8Encoder.encode(fsId);
             const sizeBuffer = new ArrayBuffer(4);

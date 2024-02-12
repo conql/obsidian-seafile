@@ -1,7 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
-import fs from "fs";
+import fs from "fs-extra";
 
 const banner =
 	`/*
@@ -11,7 +11,6 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
-
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -42,7 +41,10 @@ const context = await esbuild.context({
 	plugins: [{
 		name: "post-build",
 		setup(build) {
+			let appSettings = "";
 			build.onStart(() => {
+				if (fs.existsSync("dist/data.json"))
+					appSettings = JSON.parse(fs.readFileSync("dist/data.json", "utf-8"));
 				fs.rmSync("dist", { recursive: true, force: true });
 			});
 			build.onEnd(async result => {
@@ -50,6 +52,14 @@ const context = await esbuild.context({
 				if (!prod) {
 					fs.writeFileSync("dist/.hotreload", "");
 				}
+				fs.copyFileSync("manifest.json", "dist/manifest.json");
+				fs.writeFileSync("dist/data.json", JSON.stringify(appSettings));
+
+				// Copy dist folder to test vault
+				const testVaultPath = "vault/.obsidian/plugins/obsidian-seafile";
+				if(fs.existsSync(testVaultPath))
+					fs.rmSync(testVaultPath, { recursive: true, force: true });
+				fs.copySync("dist", testVaultPath);
 			});
 		}
 	}],

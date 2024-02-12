@@ -19,12 +19,13 @@ dist/
 
 # Exclude test vault
 vault/*
-!vault/.obsidian/
-!vault/.obsidian/plugins/hotreload/
-
 
 # Exclude test environmental variables
 src/test/env.ts
 
 temp
 temp*.json
+
+# Exclude scripts temporary files
+scripts/*
+!scripts/*.py

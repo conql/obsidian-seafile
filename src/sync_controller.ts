@@ -3,6 +3,8 @@ import * as IgnoreParser from 'gitignore-parser';
 import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "./server";
 import { STATE_UPLOAD, SyncNode } from "./sync_node";
 import * as utils from "./utils";
+import { HEAD_COMMIT_PATH } from "./config";
+import { Plugin } from "obsidian";
 
 const adapter = app.vault.adapter;
 
@@ -14,10 +16,11 @@ export class SyncController {
         maybe(input: string): boolean;
     };
 
-    localHead: string = "";
-    uploads: Set<SyncNode> = new Set();
-
-    public constructor(private server: Server, private nodeRoot: SyncNode, private ignorePattern: string = "") {
+    public constructor(
+        private interval: number,
+        private server: Server,
+        private nodeRoot: SyncNode,
+        private ignorePattern: string = "") {
         this.account = server.getAccount();
         const selfIgnorePath = '/.obsidian/plugins/obsidian-seafile';
         this.ignore = IgnoreParser.compile(ignorePattern);
@@ -26,17 +29,11 @@ export class SyncController {
         }
     }
 
-    // public async pullRemoteHead() {
-    //     this.remoteHead = await this.server.getHeadCommit();
-    //     this.remoteRoot = await this.server.getCommitRoot(this.remoteHead);
-    //     await this.pull("", this.nodeRoot, this.remoteRoot)
-    // }
-
     async downloadFile(path: string, fsId: string, mtime: number) {
         await adapter.write(path, "");
 
         if (fsId == ZeroFs) {
-            await adapter.write(path, "");
+            await adapter.write(path, "", { mtime: mtime * 1000 });
             return;
         }
 
@@ -47,11 +44,11 @@ export class SyncController {
         }
     }
 
-    public async pull(path: string, node: SyncNode, remote?: SeafDirent) {
+    public async pull(uploads: Set<SyncNode>, path: string, node: SyncNode, remote?: SeafDirent) {
         // Step 0. Check ignore pattern
         if (this.ignore.denies(path)) {
             if (remote) {
-                node.setPrev(remote, false);
+                await node.setPrevAsync(remote, false);
                 node.state = { type: "sync" };
                 return;
             }
@@ -72,10 +69,10 @@ export class SyncController {
         if (
             (!local && !remote) ||
             (node && node.prev && remote && node.prevDirty === false && node.prev.id === remote.id) ||
-            (local?.mtime === remote?.mtime && local?.type == "file" && remote?.mode == MODE_FILE && local?.size === (remote?.size))
+            (local && remote && local.mtime === remote.mtime * 1000 && local.type == "file" && remote.mode == MODE_FILE && local.size === remote.size && false)
         ) {
             target = "same";
-            node.setPrev(remote!, false);
+            await node.setPrevAsync(remote!, false);
             node.state = { type: "sync" };
             return;
         }
@@ -157,12 +154,20 @@ export class SyncController {
                 await adapter.mkdir(path);
             }
 
-            await Promise.all([...newChildrenNames].map(async (name) => {
-                return await this.pull(
-                    utils.Path.join(path, name),
-                    nodeChildren[name] ?? node.createChild(name),
-                    newRemote[name]);
-            }));
+            let promises = [];
+            for (let name of newChildrenNames) {
+                let nodeChild = nodeChildren[name] ?? node.createChild(name);
+                let remoteChild = target == "local" ? nodeChild.prev : newRemote[name];
+
+                promises.push(
+                    this.pull(
+                        uploads,
+                        utils.Path.join(path, name),
+                        nodeChild,
+                        remoteChild
+                    ));
+            }
+            await Promise.all(promises);
 
             // After pulling children, merge status is changed to local
             if (target == "merge") {
@@ -187,12 +192,12 @@ export class SyncController {
             else {
                 if (remote.mode == MODE_FILE) {
                     await this.downloadFile(path, remote.id, remote.mtime);
-                    node.setPrev(remote, false);
+                    await node.setPrevAsync(remote, false);
                     node.state = { type: "sync" };
                     return;
                 }
                 else {
-                    node.setPrev(remote, true);
+                    await node.setPrevAsync(remote, true);
                     // Let below code to recompute dirent and fs
                 }
             }
@@ -207,7 +212,7 @@ export class SyncController {
                 const [dirent, fs, blocks] = await this.computeFileDirent(path, this.account);
                 node.setNext(dirent, true);
                 node.state = { type: "upload", param: { progress: 0, fs, blocks } };
-                this.uploads.add(node);
+                uploads.add(node);
                 return;
             }
         }
@@ -223,14 +228,14 @@ export class SyncController {
 
         const [dirent, fs] = await this.computeDirDirent(path, dirents, mtime);
         if (dirent.id === remote?.id) {
-            node.setPrev(dirent, false);
+            await node.setPrevAsync(dirent, false);
             node.state = { type: "sync" };
             return;
         }
         else {
             node.setNext(dirent, false);
             node.state = { type: "upload", param: { progress: 0, fs } };
-            this.uploads.add(node);
+            uploads.add(node);
         }
     }
 
@@ -353,28 +358,136 @@ export class SyncController {
         return blocks;
     }
 
-    async push(parentId: string, root: SyncNode, uploads: Set<SyncNode>) {
+    async push(nodeRoot: SyncNode, uploads: Set<SyncNode>, parentCommitId: string): Promise<string> {
+        if (!nodeRoot.next) {
+            console.log("Nothing to push");
+            return parentCommitId;
+        }
+
         // Upload fs
         await Promise.all([...uploads].map(async (node) => {
-            assert(node.state.type == "upload");
+            if (node.state.type !== "upload" || !node.next) {
+                throw Error("Node is not ready for upload")
+            }
+
             const param = (node.state as STATE_UPLOAD).param;
             if (param.blocks) {
                 await Promise.all(Object.entries(param.blocks).map(async ([blockId, block]) => {
-                    await this.server.sendBlock(blockId, block);
+                    if (await this.server.checkBlock(blockId))
+                        await this.server.sendBlock(blockId, block);
                 }));
             }
-            await this.server.sendFs([node.prev!.id, param.fs])
+            if (await this.server.checkFs(node.next.id))
+                await this.server.sendFs([node.next.id, param.fs])
         }));
 
         // Create commit
-        const commit = await this.server.createCommit(root.prev!.id, "No Description", parentId);
+        const commit = await this.server.createCommit(nodeRoot.next.id, "No Description", parentCommitId);
         await this.server.uploadCommit(commit);
         await this.server.setHeadCommit(commit.commit_id);
 
-        // Update local head
-        this.localHead = commit.commit_id;
+        // Update nodes
+        for (let node of uploads) {
+            await node.applyNext();
+        }
+
+        return commit.commit_id;
     }
 
-    async notifyFileChange(path: string) {
+    async notifyChange(path: string, type: "create" | "modify" | "delete") {
+        if (type == "create") {
+            if (this.nodeRoot.find(path)) return;
+        }
+        if (type == "delete") {
+            if (!this.nodeRoot.find(path)) return;
+        }
+
+        this.nodeRoot.setDirty(path);
+    }
+
+    private localHead?: string;
+    private async setLocalHeadAsync(commitId: string) {
+        if (this.localHead != commitId) {
+            this.localHead = commitId;
+            await adapter.write(HEAD_COMMIT_PATH, this.localHead);
+        }
+    }
+
+    async sync() {
+        if (this.localHead === undefined) {
+            if (await adapter.exists(HEAD_COMMIT_PATH)) {
+                this.localHead = await adapter.read(HEAD_COMMIT_PATH)
+            }
+            else {
+                this.localHead = ""
+            }
+        }
+
+        const uploads = new Set<SyncNode>();
+        const remoteHead = await this.server.getHeadCommitId();
+        const remoteRoot = await this.server.getCommitRoot(remoteHead);
+
+        console.time("Pull");
+        await this.pull(uploads, "", this.nodeRoot, remoteRoot);
+        console.timeEnd("Pull");
+
+        await this.setLocalHeadAsync(this.localHead);
+
+        console.time("Push");
+        const newHead = await this.push(this.nodeRoot, uploads, this.localHead);
+        console.time("Push");
+
+        await this.setLocalHeadAsync(newHead);
+    }
+
+    private timeoutId: any;
+    private _status: "idle" | "busy" | "stop" | "pendingStop" = "stop";
+    public get status() { return this._status; }
+    private set status(value) { this._status = value };
+
+    startSync() {
+        if (this.status == "stop") {
+            this.status = "idle";
+            this.syncCycle();
+        }
+        else if (this.status == "pendingStop") {
+            this.status = "busy";
+        }
+        else if (this.status == "idle") {
+            clearTimeout(this.timeoutId);
+            this.syncCycle();
+        }
+    }
+
+    async syncCycle() {
+        if (this.status == "idle") {
+            this.status = "busy";
+            try {
+                await this.sync();
+            }
+            catch (e) {
+                console.error(e);
+                this.status = "stop";
+            }
+
+            if (this.status as any != "pendingStop") {
+                this.status = "idle";
+                this.timeoutId = setTimeout(() => {
+                    this.syncCycle();
+                }, this.interval);
+            }
+            else {
+                this.status = "stop";
+            }
+        }
+    }
+
+    stopSync() {
+        if (this.status == "idle") {
+            clearTimeout(this.timeoutId);
+        }
+        else if (this.status == "busy") {
+            this.status = "pendingStop";
+        }
     }
 }

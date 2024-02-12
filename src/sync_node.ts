@@ -2,6 +2,7 @@ import { FileSeafDirent, MODE_FILE, SeafDirent, SeafFs } from "./server";
 import * as utils from "./utils";
 import { EventSource } from "./event_source";
 import { DataAdapter } from "obsidian";
+import { DATA_DIR } from "./config";
 
 export type STATE_DOWNLOAD = {
     type: "download",
@@ -27,7 +28,7 @@ export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC;
 export type SyncNodeListener = (node: SyncNode) => void;
 
 const adapter = app.vault.adapter;
-const rootDataPath = ".obsidian/plugins/obsidian-seafile/data";
+
 export class SyncNode {
     private readonly path: string;
     private children: Record<string, SyncNode> = {};
@@ -102,13 +103,13 @@ export class SyncNode {
         }
 
         try {
-            const root = await loadPath(rootDataPath);
+            const root = await loadPath(DATA_DIR);
             return root;
         }
         catch {
             // Check if rootDataPath exists
-            if (! await adapter.exists(rootDataPath)) {
-                await adapter.mkdir(rootDataPath);
+            if (! await adapter.exists(DATA_DIR)) {
+                await adapter.mkdir(DATA_DIR);
             }
 
             const root = new SyncNode("");
@@ -117,9 +118,8 @@ export class SyncNode {
     }
 
     private async savePrev() {
-        const rootDataPath = ".obsidian/obsidian-seafile/data/";
         const escapedPath = this.path.replace(/metadata.json$/g, "#metadata.json");
-        const savePath = rootDataPath + escapedPath;
+        const savePath = DATA_DIR + escapedPath;
 
         if (!this.prev) {
             // Delete
@@ -145,42 +145,61 @@ export class SyncNode {
     }
 
     exec(path: string, callback: (node: SyncNode) => boolean, order: "pre" | "post" = "pre", throwError = true): boolean {
+        while (path.startsWith("/")) path = path.slice(1);
+
         let [first, rest] = utils.splitFirstSlash(path);
         while (!first && rest) {
             [first, rest] = utils.splitFirstSlash(rest);
         }
 
         if (order == "pre") {
-            if (callback(this)) return true;
+            if (callback(this))
+                return true;
         }
         if (first) {
             const child = this.children[first];
             if (!child) {
-                if (throwError) throw new Error("Cannot find child " + first);
-                return true;
+                if (throwError)
+                    throw new Error("Cannot find child " + first);
             }
-            if (rest) {
-                if (child.exec(rest, callback, order, throwError)) {
-                    return true;
+            else {
+                if (rest) {
+                    if (child.exec(rest, callback, order, throwError)) {
+                        return true;
+                    }
+                }
+                else {
+                    if (callback(child))
+                        return true;
                 }
             }
-            else
-                if (callback(child)) return true;
         }
         if (order == "post") {
-            if (callback(this)) return true;
+            if (callback(this))
+                return true;
         }
 
         return false;
     }
 
-    find(path: string): SyncNode {
+    find(path: string): SyncNode | null {
         let found: SyncNode | null = null;
         this.exec(path, (node) => {
             found = node;
             return true;
-        }, "post", true);
-        return found!;
+        }, "post", false);
+        return found;
+    }
+
+    setDirty(path: string) {
+        this.exec(path, (node) => {
+            node.prevDirty = true;
+            if (node.next) {
+                node.nextDirty = true;
+            }
+
+            return false;
+        }, "post", false);
     }
 
     private addChild(node: SyncNode) {
@@ -221,7 +240,7 @@ export class SyncNode {
         this._prev = value;
     }
 
-    async setPrev(prev?: SeafDirent, dirty = true) {
+    async setPrevAsync(prev?: SeafDirent, dirty = true) {
         this.prevDirty = dirty;
         if (this.prev?.id !== prev?.id) {
             this.prev = prev;
@@ -230,8 +249,11 @@ export class SyncNode {
     }
 
     async applyNext() {
-        await this.setPrev(this.next, this.nextDirty);
-        await this.setNext(undefined, true);
+        await this.setPrevAsync(this.next, this.nextDirty);
+        this.setNext(undefined, true);
+        if (!this.prevDirty) {
+            this.state = { "type": "sync" }
+        }
     }
 
     getChildren(): Record<string, SyncNode> {
@@ -244,7 +266,7 @@ export class SyncNode {
         }
 
         if (this.prev) {
-            await this.setPrev(undefined, true);
+            await this.setPrevAsync(undefined, true);
         }
 
     }
@@ -256,8 +278,10 @@ export class SyncNode {
         });
         return {
             name: this.name,
-            dirty: this.prevDirty,
-            cache: this.prev,
+            prevDirty: this.prevDirty,
+            prev: this.prev,
+            nextDirty: this.nextDirty,
+            next: this.next,
             children: cjson
         }
     }
