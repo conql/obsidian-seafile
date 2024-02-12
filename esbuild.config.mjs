@@ -2,6 +2,7 @@ import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
 import fs from "fs-extra";
+import CssModulesPlugin from 'esbuild-css-modules-plugin';
 
 const banner =
 	`/*
@@ -38,31 +39,43 @@ const context = await esbuild.context({
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outdir: "dist",
-	plugins: [{
-		name: "post-build",
-		setup(build) {
-			let appSettings = "";
-			build.onStart(() => {
-				if (fs.existsSync("dist/data.json"))
-					appSettings = JSON.parse(fs.readFileSync("dist/data.json", "utf-8"));
-				fs.rmSync("dist", { recursive: true, force: true });
-			});
-			build.onEnd(async result => {
-				// Add file .hotreload if in development
-				if (!prod) {
-					fs.writeFileSync("dist/.hotreload", "");
-				}
-				fs.copyFileSync("manifest.json", "dist/manifest.json");
-				fs.writeFileSync("dist/data.json", JSON.stringify(appSettings));
+	plugins: [
+		CssModulesPlugin({
+			force: true,
+			inject: false,
+			pattern: "[local]-[hash]",
+			localsConvention: "camelCase"
+		}),
+		{
+			name: "post-build",
+			setup(build) {
+				let appSettings = "";
+				build.onStart(() => {
+					if (fs.existsSync("dist/data.json"))
+						appSettings = JSON.parse(fs.readFileSync("vault/.obsidian/plugins/obsidian-seafile/data.json", "utf-8"));
+					fs.rmSync("dist", { recursive: true, force: true });
+				});
+				build.onEnd(async result => {
+					// Copy dist/src folder to dist/ folder
+					fs.copySync("dist/src", "dist");
+					fs.rmSync("dist/src", { recursive: true, force: true });
+					fs.renameSync("dist/main.css", "dist/styles.css");
 
-				// Copy dist folder to test vault
-				const testVaultPath = "vault/.obsidian/plugins/obsidian-seafile";
-				if(fs.existsSync(testVaultPath))
-					fs.rmSync(testVaultPath, { recursive: true, force: true });
-				fs.copySync("dist", testVaultPath);
-			});
-		}
-	}],
+					// Add file .hotreload if in development
+					if (!prod) {
+						fs.writeFileSync("dist/.hotreload", "");
+					}
+					fs.copyFileSync("manifest.json", "dist/manifest.json");
+					fs.writeFileSync("dist/data.json", JSON.stringify(appSettings));
+
+					// Copy dist folder to test vault
+					const testVaultPath = "vault/.obsidian/plugins/obsidian-seafile";
+					if (fs.existsSync(testVaultPath))
+						fs.rmSync(testVaultPath, { recursive: true, force: true });
+					fs.copySync("dist", testVaultPath);
+				});
+			}
+		}],
 });
 
 if (prod) {

@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, TextComponent, arrayBufferToHex } from "obsidian";
-import PluginSeafile from "./main";
+import SeafilePlugin from "./main";
 
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
 
@@ -11,7 +11,8 @@ export interface Settings {
     deviceName: string,
     deviceId: string,
     interval: number,
-    ignore: string
+    ignore: string,
+    devMode: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -22,7 +23,8 @@ export const DEFAULT_SETTINGS: Settings = {
     deviceName: "obsidian-seafile",
     deviceId: "",
     interval: 15000,
-    ignore: ""
+    ignore: "",
+    devMode: false
 }
 
 function generateDeviceId() {
@@ -34,7 +36,7 @@ function generateDeviceId() {
 
 export class SettingTab extends PluginSettingTab {
 
-    constructor(public app: App, private plugin: PluginSeafile) {
+    constructor(public app: App, private plugin: SeafilePlugin) {
         super(app, plugin);
     }
 
@@ -133,6 +135,15 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
+            .setName('Dev Mode')
+            .setDesc('Enable Dev Mode')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.devMode)
+                .onChange(async (value) => {
+                    this.plugin.settings.devMode = value;
+                })
+            );
+        new Setting(containerEl)
             .setName('Save Settings')
             .addButton(button => button
                 .setButtonText('Save & Restart')
@@ -147,7 +158,7 @@ export class SettingTab extends PluginSettingTab {
 
 }
 
-export async function loadSettings(plugin: PluginSeafile) {
+export async function loadSettings(plugin: SeafilePlugin) {
     const settings = Object.assign({}, DEFAULT_SETTINGS, await plugin.loadData());
     if (settings.deviceId.length < 40) {
         settings.deviceId = generateDeviceId();
@@ -156,6 +167,6 @@ export async function loadSettings(plugin: PluginSeafile) {
     return settings;
 }
 
-export async function saveSettings(settings: Settings, plugin: PluginSeafile) {
+export async function saveSettings(settings: Settings, plugin: SeafilePlugin) {
     await plugin.saveData(settings);
 }

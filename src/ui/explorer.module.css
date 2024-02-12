@@ -1,0 +1,40 @@
+.sync-state {
+    -webkit-app-region: no-drag;
+    /* background-color: var(--background-modifier-border-hover); */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--size-2-2) var(--size-2-3);
+    cursor: var(--cursor);
+    border-radius: var(--clickable-icon-radius);
+    color: var(--icon-color);
+    opacity: 35%;
+    line-height: var(--line-height-normal);
+    align-self: center;
+    height: 1em;
+    /* margin-left: auto; */
+}
+
+.sync-state svg {
+    width: 1em;
+}
+
+.sync-state-sync {
+    color: var(--color-success);
+}
+
+.sync-state-default-text {
+    display: block;
+}
+
+.sync-state>.sync-state-hover-text {
+    display: none;
+}
+
+.sync-state:hover>.sync-state-default-text {
+    display: none;
+}
+
+.sync-state:hover>.sync-state-hover-text {
+    display: block;
+}

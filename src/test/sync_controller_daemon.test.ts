@@ -2,8 +2,8 @@ import { describe, expect, jest, test } from '@jest/globals';
 import Server, { Commit, DirInfo } from '../server';
 import fs from 'fs'
 import * as env from "./env";
-import { SyncController } from '../sync_controller';
-import { SyncNode } from '../sync_node';
+import { SyncController } from '../sync/controller';
+import { SyncNode } from '../sync/node';
 import { Path } from '../utils';
 import { MockPlugin } from './mock_plugin';
 

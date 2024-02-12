@@ -2,8 +2,8 @@ import { describe, expect, jest, test } from '@jest/globals';
 import Server, { Commit, DirInfo } from '../server';
 import fs from 'fs'
 import * as env from "./env";
-import { SyncController } from '../sync_controller';
-import { SyncNode } from '../sync_node';
+import { SyncController } from '../sync/controller';
+import { SyncNode } from '../sync/node';
 import { Path } from '../utils';
 import { MockPlugin } from './mock_plugin';
 
@@ -16,14 +16,14 @@ describe("Basic test", () => {
     let uploads = new Set<SyncNode>();
     let dirInfo: DirInfo[];
 
-    const pullHead = async (upload = false) => {
+    const pullHead = async (upload = false, root = rootNode) => {
         dirInfo = await server.getDirInfo("", true);
         fs.writeFileSync("temp_remote.json", JSON.stringify(dirInfo, null, 4));
 
         const remoteHead = await server.getHeadCommitId();
         const remoteRoot = await server.getCommitRoot(remoteHead);
         uploads.clear();
-        await sync.pull(uploads, "", rootNode, remoteRoot);
+        await sync.pull(uploads, "", root, remoteRoot);
         localHead = remoteHead;
 
         fs.writeFileSync("temp_local.json", JSON.stringify(rootNode.toJson(), null, 4));
@@ -67,11 +67,18 @@ describe("Basic test", () => {
     }, 10000);
 
     test('Load SyncNode from disk', async () => {
-        const node = await SyncNode.init();
-        expect(node.prev?.id).toBe(rootNode.prev?.id);
+        const newRoot = await SyncNode.init();
+        expect(newRoot.prev?.id).toBe(rootNode.prev?.id);
         const path = findRandomFile();
-        expect(node.find(path)!.prev?.id).toBe(rootNode.find(path)!.prev?.id);
+        expect(newRoot.find(path)!.prev?.id).toBe(rootNode.find(path)!.prev?.id);
+
+        sync = new SyncController(15000, server, newRoot, ".obsidian");
+        rootNode = newRoot;
     });
+
+    test('Restart pull', async () => {
+        await pullHead();
+    }, 10000);
 
     test('Pull and Push', async () => {
         // Remote move
@@ -95,7 +102,7 @@ describe("Basic test", () => {
 
         console.log("Pulling head")
         await pullHead(true);
-        
+
         console.log("Pushing")
         localHead = await sync.push(rootNode, uploads, localHead);
 

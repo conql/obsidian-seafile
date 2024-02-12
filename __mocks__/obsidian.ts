@@ -85,11 +85,11 @@ class MockDataAdapter implements DataAdapter {
         }
     }
     async list(normalizedPath: string): Promise<ListedFiles> {
-        normalizedPath = this.resolvePath(normalizedPath);
-        const files = await fs.readdir(normalizedPath, { withFileTypes: true });
+        const resolvedPath = this.resolvePath(normalizedPath);
+        const files = await fs.readdir(resolvedPath, { withFileTypes: true });
         const listedFiles: ListedFiles = {
-            files: files.filter(f => f.isFile()).map(f => f.name),
-            folders: files.filter(f => f.isDirectory()).map(f => f.name),
+            files: files.filter(f => f.isFile()).map(f => Path.join(normalizedPath, f.name)),
+            folders: files.filter(f => f.isDirectory()).map(f => Path.join(normalizedPath, f.name)),
         }
         return listedFiles;
     }

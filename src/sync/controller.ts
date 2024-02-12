@@ -1,10 +1,11 @@
 import { assert } from "console";
 import * as IgnoreParser from 'gitignore-parser';
-import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "./server";
-import { STATE_UPLOAD, SyncNode } from "./sync_node";
-import * as utils from "./utils";
-import { HEAD_COMMIT_PATH } from "./config";
-import { Plugin } from "obsidian";
+import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
+import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedListener } from "./node";
+import * as utils from "../utils";
+import { debug } from "../utils";
+import { HEAD_COMMIT_PATH } from "../config";
+import { Platform, Plugin } from "obsidian";
 
 const adapter = app.vault.adapter;
 
@@ -15,12 +16,13 @@ export class SyncController {
         denies(input: string): boolean;
         maybe(input: string): boolean;
     };
+    private nodeRoot: SyncNode;
 
     public constructor(
         private interval: number,
         private server: Server,
-        private nodeRoot: SyncNode,
         private ignorePattern: string = "") {
+
         this.account = server.getAccount();
         const selfIgnorePath = '/.obsidian/plugins/obsidian-seafile';
         this.ignore = IgnoreParser.compile(ignorePattern);
@@ -29,19 +31,45 @@ export class SyncController {
         }
     }
 
+    // Load SyncNodes from local storage
+    async init() {
+        this.nodeRoot = await SyncNode.loadPath(n => this.nodeStateChanged(n));
+    }
+
     async downloadFile(path: string, fsId: string, mtime: number) {
+        mtime = mtime * 1000;
         await adapter.write(path, "");
 
         if (fsId == ZeroFs) {
-            await adapter.write(path, "", { mtime: mtime * 1000 });
+            await adapter.write(path, "", { mtime });
             return;
+        }
+
+        let nativePath = undefined;
+        if (Platform.isMobile) {
+            nativePath = (app.vault.adapter as any).getNativePath(path)
         }
 
         const fs = await this.server.getFs(fsId) as FileSeafFs;
         for (let blockId of fs.block_ids) {
             const block = await this.server.getBlock(blockId);
-            await adapter.append(path, new DataView(block) as any as string, { mtime: mtime * 1000 });
+            if (Platform.isDesktop) {
+                await app.vault.adapter.append(path, new DataView(block) as unknown as string, { mtime })
+            }
+            else {
+                // Platform is mobile
+                // Encode array buffer to base64 string
+                let encoded = await utils.arrayBufferToBase64(block);
+                // Append to file
+                // Hacky way to get the filesystem plugin
+                await (window.top as any).Capacitor.Plugins.Filesystem.appendFile({ path: nativePath, data: encoded });
+            }
         }
+    }
+
+    public onNodeStateChanged?: NodeStateChangedListener;
+    private nodeStateChanged(node: SyncNode) {
+        this.onNodeStateChanged?.(node);
     }
 
     public async pull(uploads: Set<SyncNode>, path: string, node: SyncNode, remote?: SeafDirent) {
@@ -69,7 +97,7 @@ export class SyncController {
         if (
             (!local && !remote) ||
             (node && node.prev && remote && node.prevDirty === false && node.prev.id === remote.id) ||
-            (local && remote && local.mtime === remote.mtime * 1000 && local.type == "file" && remote.mode == MODE_FILE && local.size === remote.size && false)
+            (local && remote && local.mtime === remote.mtime * 1000 && local.type == "file" && remote.mode == MODE_FILE && local.size === remote.size)
         ) {
             target = "same";
             await node.setPrevAsync(remote!, false);
@@ -124,7 +152,7 @@ export class SyncController {
 
         if ((target == "local" || target == "merge") && local && local.type == "folder") {
             const fileList = await adapter.list(path);
-            const list = [...fileList.files, ...fileList.folders];
+            const list = [...fileList.files, ...fileList.folders].map(abs => utils.Path.basename(abs));
             if (!newChildrenNames) newChildrenNames = new Set();
             for (let name of list) {
                 newChildrenNames.add(name);
@@ -156,13 +184,13 @@ export class SyncController {
 
             let promises = [];
             for (let name of newChildrenNames) {
-                let nodeChild = nodeChildren[name] ?? node.createChild(name);
+                let nodeChild = nodeChildren[name] ?? node.createChild(name, n => this.nodeStateChanged(n));
                 let remoteChild = target == "local" ? nodeChild.prev : newRemote[name];
 
                 promises.push(
                     this.pull(
                         uploads,
-                        utils.Path.join(path, name),
+                        path + "/" + name,
                         nodeChild,
                         remoteChild
                     ));
@@ -236,6 +264,7 @@ export class SyncController {
             node.setNext(dirent, false);
             node.state = { type: "upload", param: { progress: 0, fs } };
             uploads.add(node);
+            debug.log(`Upload ${path}.`, fs, node.prev ? await this.server.getFs(node.prev.id) : null);
         }
     }
 
@@ -283,29 +312,31 @@ export class SyncController {
         return [dirent, fs, blockBuffer];
     }
 
+    async createDirFs(children: SeafDirent[]): Promise<[string, SeafFs]> {
+        let count = Object.keys(children).length;
+        if (count === 0)
+            return [ZeroFs, ZeroFs];
+
+        let childrenDirents = Object.values(children);
+
+        childrenDirents.sort((a, b) => {
+            return utils.strcmp((b as SeafDirent).name, (a as SeafDirent).name);
+        });
+
+        let fs: DirSeafFs = {
+            dirents: childrenDirents,
+            type: 3,
+            version: 1,
+        }
+        let fsId = await utils.computeFsId(fs);
+        return [fsId, fs];
+    }
+
     async computeDirDirent(path: string, children: SeafDirent[], defaultMtime?: number): Promise<[DirSeafDirent, SeafFs]> {
         const name = utils.Path.basename(path);
-        const createDirFs = async (): Promise<[string, SeafFs]> => {
-            let count = Object.keys(children).length;
-            if (count === 0)
-                return [ZeroFs, ZeroFs];
 
-            let childrenDirents = Object.values(children);
 
-            childrenDirents.sort((a, b) => {
-                return utils.strcmp((b as SeafDirent).name, (a as SeafDirent).name);
-            });
-
-            let fs: DirSeafFs = {
-                dirents: childrenDirents,
-                type: 3,
-                version: 1,
-            }
-            let fsId = await utils.computeFsId(fs);
-            return [fsId, fs];
-        }
-
-        const [fsId, fs] = await createDirFs();
+        const [fsId, fs] = await this.createDirFs(children);
 
         let mtime = defaultMtime;
         if (!mtime) {
@@ -340,7 +371,7 @@ export class SyncController {
 
         // if size > 50MB, warn user
         if (stat.size > 50 * 1024 * 1024) {
-            console.warn(`File '${localPath}' is larger than 50MB. This may take a while or even crash obsidian.`);
+            debug.warn(`File '${localPath}' is larger than 50MB. This may take a while or even crash obsidian.`);
         }
 
         let blocks: Record<string, ArrayBuffer> = {};
@@ -360,7 +391,7 @@ export class SyncController {
 
     async push(nodeRoot: SyncNode, uploads: Set<SyncNode>, parentCommitId: string): Promise<string> {
         if (!nodeRoot.next) {
-            console.log("Nothing to push");
+            debug.log("Nothing to push");
             return parentCommitId;
         }
 
@@ -427,15 +458,15 @@ export class SyncController {
         const remoteHead = await this.server.getHeadCommitId();
         const remoteRoot = await this.server.getCommitRoot(remoteHead);
 
-        console.time("Pull");
+        debug.time("Pull");
         await this.pull(uploads, "", this.nodeRoot, remoteRoot);
-        console.timeEnd("Pull");
+        debug.timeEnd("Pull");
 
-        await this.setLocalHeadAsync(this.localHead);
+        await this.setLocalHeadAsync(remoteHead);
 
-        console.time("Push");
+        debug.time("Push");
         const newHead = await this.push(this.nodeRoot, uploads, this.localHead);
-        console.time("Push");
+        debug.timeEnd("Push");
 
         await this.setLocalHeadAsync(newHead);
     }
@@ -447,6 +478,7 @@ export class SyncController {
 
     startSync() {
         if (this.status == "stop") {
+            debug.log("Sync started");
             this.status = "idle";
             this.syncCycle();
         }
@@ -454,6 +486,7 @@ export class SyncController {
             this.status = "busy";
         }
         else if (this.status == "idle") {
+            debug.log("Sync started");
             clearTimeout(this.timeoutId);
             this.syncCycle();
         }
@@ -466,8 +499,8 @@ export class SyncController {
                 await this.sync();
             }
             catch (e) {
-                console.error(e);
-                this.status = "stop";
+                debug.error(e);
+                this.status = "pendingStop";
             }
 
             if (this.status as any != "pendingStop") {
@@ -478,6 +511,7 @@ export class SyncController {
             }
             else {
                 this.status = "stop";
+                debug.log("Sync stopped");
             }
         }
     }
@@ -485,9 +519,12 @@ export class SyncController {
     stopSync() {
         if (this.status == "idle") {
             clearTimeout(this.timeoutId);
+            this.status = "stop";
+            debug.log("Sync stopped");
         }
         else if (this.status == "busy") {
             this.status = "pendingStop";
+            debug.log("Sync stopping");
         }
     }
 }
