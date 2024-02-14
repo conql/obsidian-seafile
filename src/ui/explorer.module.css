@@ -1,4 +1,4 @@
-.sync-state {
+.node-state {
     -webkit-app-region: no-drag;
     /* background-color: var(--background-modifier-border-hover); */
     display: flex;
@@ -15,26 +15,46 @@
     /* margin-left: auto; */
 }
 
-.sync-state svg {
+.node-state svg {
     width: 1em;
 }
 
-.sync-state-sync {
+.node-state-sync {
     color: var(--color-success);
 }
 
-.sync-state-default-text {
+.node-state-default-text {
     display: block;
 }
 
-.sync-state>.sync-state-hover-text {
+.node-state>.node-state-hover-text {
     display: none;
 }
 
-.sync-state:hover>.sync-state-default-text {
+.node-state:hover>.node-state-default-text {
     display: none;
 }
 
-.sync-state:hover>.sync-state-hover-text {
+.node-state:hover>.node-state-hover-text {
     display: block;
+}
+
+.sync-status {
+    display: flex;
+    text-align: end;
+}
+
+.sync-status-logo {
+    margin: 0 8px 0 20px;
+}
+
+.sync-status-text {
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    white-space: var(--nav-item-white-space);
+    text-overflow: ellipsis;
+    font-size: var(--vault-name-font-size);
+    color: var(--vault-name-color);
+    font-weight: var(--vault-name-font-weight);
 }

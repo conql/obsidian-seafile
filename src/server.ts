@@ -1,6 +1,7 @@
 import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
 import pRetry from "p-retry";
 import pThrottle from "p-throttle";
+import pTimeout from "p-timeout";
 import * as utils from "./utils";
 const pako = require('pako');
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
@@ -138,14 +139,16 @@ export default class Server {
     }
 
     public async login(): Promise<void> {
-        this.authToken = await this.getAuthToken();
-        this.repoId = await this.getRepoId(this.repoName);
-        this.repoToken = await this.getRepoToken(this.repoId);
+        await pTimeout((async () => {
+            this.authToken = await this.getAuthToken();
+            this.repoId = await this.getRepoId(this.repoName);
+            this.repoToken = await this.getRepoToken(this.repoId);
+        })(), { milliseconds: 10 * 1000 });
     }
 
 
     request(req: RequestUrlParam & RequestParam): RequestUrlResponsePromise {
-        return requestUrl(req);
+        return pTimeout(requestUrl(req), { milliseconds: 120 * 1000 }) as any as RequestUrlResponsePromise;
     }
 
     private requestThrottled = pThrottle({ interval: 1000, limit: 15 })(this.request);

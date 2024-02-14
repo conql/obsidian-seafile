@@ -1,5 +1,7 @@
 import { App, PluginSettingTab, Setting, TextComponent, arrayBufferToHex } from "obsidian";
 import SeafilePlugin from "./main";
+import Dialog from "./ui/dialog";
+import { debug } from "./utils";
 
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
 
@@ -41,7 +43,7 @@ export class SettingTab extends PluginSettingTab {
     }
 
     display() {
-
+        let settings = { ...this.plugin.settings };
         const { containerEl } = this;
         containerEl.empty();
 
@@ -52,9 +54,9 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Server URL')
             .addText(text => text
                 .setPlaceholder("https://example.com")
-                .setValue(this.plugin.settings.host)
+                .setValue(settings.host)
                 .onChange(async (value) => {
-                    this.plugin.settings.host = value;
+                    settings.host = value;
                 })
             );
         new Setting(containerEl)
@@ -62,9 +64,9 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Account')
             .addText(text => text
                 .setPlaceholder("email@domain.com")
-                .setValue(this.plugin.settings.account)
+                .setValue(settings.account)
                 .onChange(async (value) => {
-                    this.plugin.settings.account = value;
+                    settings.account = value;
                 })
             );
         new Setting(containerEl)
@@ -72,9 +74,9 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Password')
             .addText(text => text
                 .setPlaceholder("password")
-                .setValue(this.plugin.settings.password)
+                .setValue(settings.password)
                 .onChange(async (value) => {
-                    this.plugin.settings.password = value;
+                    settings.password = value;
                 })
             );
         new Setting(containerEl)
@@ -82,9 +84,9 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Repo Name')
             .addText(text => text
                 .setPlaceholder("repo_name")
-                .setValue(this.plugin.settings.repoName)
+                .setValue(settings.repoName)
                 .onChange(async (value) => {
-                    this.plugin.settings.repoName = value;
+                    settings.repoName = value;
                 })
             );
         new Setting(containerEl)
@@ -92,9 +94,9 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Device Name')
             .addText(text => text
                 .setPlaceholder("obsidian-seafile")
-                .setValue(this.plugin.settings.deviceName)
+                .setValue(settings.deviceName)
                 .onChange(async (value) => {
-                    this.plugin.settings.deviceName = value;
+                    settings.deviceName = value;
                 })
             );
         let deviceIdText: TextComponent;
@@ -102,7 +104,7 @@ export class SettingTab extends PluginSettingTab {
             .setName('Device ID')
             .setDesc('Device ID')
             .addText(text => {
-                text.setValue(this.plugin.settings.deviceId)
+                text.setValue(settings.deviceId)
                     .setDisabled(true);
                 deviceIdText = text;
             }
@@ -112,7 +114,7 @@ export class SettingTab extends PluginSettingTab {
                 .onClick(() => {
                     const newDeviceId = generateDeviceId();
                     deviceIdText.setValue(newDeviceId);
-                    this.plugin.settings.deviceId = newDeviceId;
+                    settings.deviceId = newDeviceId;
                 })
             );
         new Setting(containerEl)
@@ -120,27 +122,36 @@ export class SettingTab extends PluginSettingTab {
             .setDesc('Sync Interval (seconds)')
             .addText(text => text
                 .setPlaceholder("15")
-                .setValue(Math.floor(this.plugin.settings.interval / 1000).toString())
+                .setValue(Math.floor(settings.interval / 1000).toString())
                 .onChange(async (value) => {
-                    this.plugin.settings.interval = parseInt(value) * 1000;
+                    settings.interval = parseInt(value) * 1000;
                 })
             );
         new Setting(containerEl)
             .setName('Ignore')
             .setDesc('Ignore Patterns. Gitignore syntax.')
             .addTextArea(text => text
-                .setValue(this.plugin.settings.ignore)
+                .setValue(settings.ignore)
                 .onChange(async (value) => {
-                    this.plugin.settings.ignore = value;
+                    settings.ignore = value;
                 })
             );
         new Setting(containerEl)
             .setName('Dev Mode')
             .setDesc('Enable Dev Mode')
             .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.devMode)
+                .setValue(settings.devMode)
                 .onChange(async (value) => {
-                    this.plugin.settings.devMode = value;
+                    settings.devMode = value;
+                })
+            );
+        new Setting(containerEl)
+            .setName('Clear Vault')
+            .setDesc('Delete all local files and data.')
+            .addButton(button => button
+                .setButtonText('Clear')
+                .onClick(async () => {
+                    await this.plugin.clearVault();
                 })
             );
         new Setting(containerEl)
@@ -148,11 +159,27 @@ export class SettingTab extends PluginSettingTab {
             .addButton(button => button
                 .setButtonText('Save & Restart')
                 .onClick(async () => {
-                    await saveSettings(this.plugin.settings, this.plugin)
+                    await saveSettings(settings, this.plugin)
                     await (app as any).plugins.disablePlugin("obsidian-seafile");
                     await (app as any).plugins.enablePlugin("obsidian-seafile");
                 })
             );
+    }
+
+    private async askClearVault() {
+        await new Promise<boolean>((resolve) => {
+            new Dialog(this.app,
+                "Clear Vault",
+                "Are you sure you want to clear all local files and data? This action cannot be undone. \nThis will not delete any files under obsidian config directory.",
+                async () => {
+                    await this.plugin.clearVault();
+                    resolve(true);
+                },
+                async () => {
+                    resolve(false);
+                }
+            ).open();
+        });
     }
 
 
