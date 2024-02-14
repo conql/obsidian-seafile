@@ -14,6 +14,28 @@ type NodeChange = {
     type: "add" | "remove-file" | "remove-folder" | "modify";
 }
 
+export type SYNC_IDLE = {
+    type: "idle";
+    message?: string;
+}
+
+export type SYNC_BUSY = {
+    type: "busy";
+    message?: string;
+}
+
+export type SYNC_STOP = {
+    type: "stop";
+    message?: string;
+}
+
+export type SYNC_PENDING_STOP = {
+    type: "pendingStop";
+    message?: string;
+}
+
+export type SyncStatus = SYNC_IDLE | SYNC_BUSY | SYNC_STOP | SYNC_PENDING_STOP;
+
 export class SyncController {
     private account: string;
     private ignore: {
@@ -39,16 +61,23 @@ export class SyncController {
     // Load SyncNodes from local storage
     async init() {
         this.nodeRoot = await SyncNode.loadPath(n => this.nodeStateChanged(n));
+        if (this.localHead === undefined) {
+            if (await adapter.exists(HEAD_COMMIT_PATH)) {
+                this.localHead = await adapter.read(HEAD_COMMIT_PATH)
+            }
+            else {
+                this.localHead = ""
+            }
+        }
     }
 
     async downloadFile(path: string, fsId: string, mtime: number) {
         this.ignoreChange.add(path);
         try {
             mtime = mtime * 1000;
-            await adapter.write(path, "");
+            await adapter.write(path, "", { mtime });
 
             if (fsId == ZeroFs) {
-                await adapter.write(path, "", { mtime });
                 return;
             }
 
@@ -165,7 +194,13 @@ export class SyncController {
             else {
                 // Take the newer one
                 if (Math.floor(local!.mtime / 1000) > remote!.mtime) target = "local";
-                else target = "remote";
+                else {
+                    target = "remote";
+                    if (local!.type == "file")
+                        await adapter.remove(path);
+                    else
+                        await adapter.rmdir(path, true);
+                }
             }
         }
 
@@ -500,11 +535,18 @@ export class SyncController {
         if (type == "delete") {
             if (!this.nodeRoot.find(path)) return;
         }
+        if (type == "modify") {
+            const node = this.nodeRoot.find(path);
+            if (node?.prev) {
+                const local = await adapter.stat(path);
+                if (local && Math.floor(local.mtime / 1000) === node.prev.mtime) return;
+            }
+        }
 
         this.nodeRoot.setDirty(path);
     }
 
-    private localHead?: string;
+    private localHead: string;
     private async setLocalHeadAsync(commitId: string) {
         if (this.localHead != commitId) {
             this.localHead = commitId;
@@ -513,41 +555,39 @@ export class SyncController {
     }
 
     async sync() {
-        if (this.localHead === undefined) {
-            if (await adapter.exists(HEAD_COMMIT_PATH)) {
-                this.localHead = await adapter.read(HEAD_COMMIT_PATH)
-            }
-            else {
-                this.localHead = ""
-            }
-        }
-
+        this.status = { type: "busy", message: "Fetching remote commit" }
         const changes: NodeChange[] = [];
         const remoteHead = await this.server.getHeadCommitId();
         const remoteRoot = await this.server.getCommitRoot(remoteHead);
 
+        this.status = { type: "busy", message: "Pulling changes" }
         await this.pull(changes, "", this.nodeRoot, remoteRoot);
         await this.setLocalHeadAsync(remoteHead);
 
+        this.status = { type: "busy", message: "Pushing changes" }
         const newHead = await this.push(this.nodeRoot, changes, this.localHead);
         await this.setLocalHeadAsync(newHead);
     }
 
     private timeoutId: any;
-    private _status: "idle" | "busy" | "stop" | "pendingStop" = "stop";
+    private _status: SyncStatus = { type: "stop" }
     public get status() { return this._status; }
-    private set status(value) { this._status = value };
+    private set status(value) {
+        this._status = value
+        this.onSyncStatusChanged?.(value);
+    };
+    public onSyncStatusChanged: ((status: SyncStatus) => void) | null = null;
 
     startSync() {
-        if (this.status == "stop") {
+        if (this.status.type == "stop") {
             debug.log("Sync started");
-            this.status = "idle";
+            this.status = { type: "idle" };
             this.syncCycle();
         }
-        else if (this.status == "pendingStop") {
-            this.status = "busy";
+        else if (this.status.type == "pendingStop") {
+            this.status = { type: "busy", message: this.status.message };
         }
-        else if (this.status == "idle") {
+        else if (this.status.type == "idle") {
             debug.log("Sync started");
             clearTimeout(this.timeoutId);
             this.syncCycle();
@@ -555,8 +595,8 @@ export class SyncController {
     }
 
     async syncCycle() {
-        if (this.status == "idle") {
-            this.status = "busy";
+        if (this.status.type == "idle") {
+            this.status = { type: "busy", message: "Starting sync" };
 
             debug.time("Sync")
             try {
@@ -564,32 +604,32 @@ export class SyncController {
             }
             catch (e) {
                 debug.error(e);
-                this.status = "pendingStop";
+                this.status = { type: "pendingStop", message: "Error" };
                 new Notice(`Sync failed: ${e.message}`);
             }
             debug.timeEnd("Sync")
 
             if (this.status as any != "pendingStop") {
-                this.status = "idle";
+                this.status = { type: "idle" };
                 this.timeoutId = setTimeout(() => {
                     this.syncCycle();
                 }, this.interval);
             }
             else {
-                this.status = "stop";
+                this.status = { type: "stop" };
                 debug.log("Sync stopped");
             }
         }
     }
 
     stopSync() {
-        if (this.status == "idle") {
+        if (this.status.type == "idle") {
             clearTimeout(this.timeoutId);
-            this.status = "stop";
+            this.status = { type: "stop" };
             debug.log("Sync stopped");
         }
-        else if (this.status == "busy") {
-            this.status = "pendingStop";
+        else if (this.status.type == "busy") {
+            this.status = { type: "pendingStop", message: this.status.message };
             debug.log("Sync stopping");
         }
     }

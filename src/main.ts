@@ -6,6 +6,7 @@ import { SyncNode } from './sync/node';
 import { debug, disableDebug } from './utils';
 import { DATA_DIR, HEAD_COMMIT_PATH } from './config';
 import { ExplorerView } from './ui/explorer';
+import Dialog from './ui/dialog';
 
 export default class SeafilePlugin extends Plugin {
 	settings: Settings;
@@ -32,8 +33,9 @@ export default class SeafilePlugin extends Plugin {
 			await this.server.login();
 		}
 		catch (e) {
-			new Notice('Failed to login to Seafile server: ' + e.message, 10000);
-			throw e;
+			new Notice('[Seafile] Login failed: ' + e.message, 10000);
+			debug.error(e);
+			return;
 		}
 
 		await this.afterLogin();
@@ -48,22 +50,7 @@ export default class SeafilePlugin extends Plugin {
 
 		if (this.settings.devMode) {
 			this.addRibbonIcon("dice", "Clear Vault", async () => {
-				const listedFiles = await this.app.vault.adapter.list("");
-				for (const file of listedFiles.files) {
-					await this.app.vault.adapter.remove(file);
-				}
-				for (const folder of listedFiles.folders) {
-					if (folder === ".obsidian") continue;
-					await this.app.vault.adapter.rmdir(folder, true);
-				}
-				if (await this.app.vault.adapter.exists(DATA_DIR)) {
-					await this.app.vault.adapter.rmdir(DATA_DIR, true);
-				}
-				if (await this.app.vault.adapter.exists(HEAD_COMMIT_PATH)) {
-					await this.app.vault.adapter.remove(HEAD_COMMIT_PATH);
-				}
-				await (this.app as any).plugins.disablePlugin("obsidian-seafile");
-				await (this.app as any).plugins.enablePlugin("obsidian-seafile");
+				await this.clearVault();
 			});
 			this.addRibbonIcon("dice", "Start Sync", async () => {
 				await this.sync.startSync();
@@ -94,8 +81,33 @@ export default class SeafilePlugin extends Plugin {
 		}));
 	}
 
+	async clearVault() {
+		await (app as any).plugins.disablePlugin("obsidian-seafile");
+
+		const root = await this.app.vault.adapter.list("");
+		for (const file of root.files) {
+			await this.app.vault.adapter.remove(file);
+		}
+		for (const folder of root.folders) {
+			if (folder === app.vault.configDir) {
+				continue;
+			}
+			else
+				await this.app.vault.adapter.rmdir(folder, true);
+		}
+		if (await this.app.vault.adapter.exists(DATA_DIR)) {
+			await this.app.vault.adapter.rmdir(DATA_DIR, true);
+		}
+		if (await this.app.vault.adapter.exists(HEAD_COMMIT_PATH)) {
+			await this.app.vault.adapter.remove(HEAD_COMMIT_PATH);
+		}
+
+		await (this.app as any).plugins.enablePlugin("obsidian-seafile");
+	}
+
 	onunload() {
-		this.sync.stopSync();
+		if (this.sync)
+			this.sync.stopSync();
 	}
 
 }

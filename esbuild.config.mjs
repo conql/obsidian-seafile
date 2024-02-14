@@ -39,6 +39,9 @@ const context = await esbuild.context({
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outdir: "dist",
+	loader: {
+		".svg": "text"
+	},
 	plugins: [
 		CssModulesPlugin({
 			force: true,
@@ -51,7 +54,7 @@ const context = await esbuild.context({
 			setup(build) {
 				let appSettings = "";
 				build.onStart(() => {
-					if (fs.existsSync("dist/data.json"))
+					if (fs.existsSync("vault/.obsidian/plugins/obsidian-seafile/data.json"))
 						appSettings = JSON.parse(fs.readFileSync("vault/.obsidian/plugins/obsidian-seafile/data.json", "utf-8"));
 					fs.rmSync("dist", { recursive: true, force: true });
 				});
