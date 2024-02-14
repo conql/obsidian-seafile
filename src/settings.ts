@@ -47,8 +47,6 @@ export class SettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Seafile Settings' });
-
         new Setting(containerEl)
             .setName('Host')
             .setDesc('Server URL')
@@ -61,7 +59,6 @@ export class SettingTab extends PluginSettingTab {
             );
         new Setting(containerEl)
             .setName('Account')
-            .setDesc('Account')
             .addText(text => text
                 .setPlaceholder("email@domain.com")
                 .setValue(settings.account)
@@ -71,7 +68,6 @@ export class SettingTab extends PluginSettingTab {
             );
         new Setting(containerEl)
             .setName('Password')
-            .setDesc('Password')
             .addText(text => text
                 .setPlaceholder("password")
                 .setValue(settings.password)
@@ -80,8 +76,7 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Repo Name')
-            .setDesc('Repo Name')
+            .setName('Repo name')
             .addText(text => text
                 .setPlaceholder("repo_name")
                 .setValue(settings.repoName)
@@ -90,8 +85,7 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Device Name')
-            .setDesc('Device Name')
+            .setName('Device name')
             .addText(text => text
                 .setPlaceholder("obsidian-seafile")
                 .setValue(settings.deviceName)
@@ -102,7 +96,6 @@ export class SettingTab extends PluginSettingTab {
         let deviceIdText: TextComponent;
         new Setting(containerEl)
             .setName('Device ID')
-            .setDesc('Device ID')
             .addText(text => {
                 text.setValue(settings.deviceId)
                     .setDisabled(true);
@@ -118,8 +111,8 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Sync Interval')
-            .setDesc('Sync Interval (seconds)')
+            .setName('Sync interval')
+            .setDesc('in seconds')
             .addText(text => text
                 .setPlaceholder("15")
                 .setValue(Math.floor(settings.interval / 1000).toString())
@@ -129,7 +122,7 @@ export class SettingTab extends PluginSettingTab {
             );
         new Setting(containerEl)
             .setName('Ignore')
-            .setDesc('Ignore Patterns. Gitignore syntax.')
+            .setDesc('Use gitignore syntax.')
             .addTextArea(text => text
                 .setValue(settings.ignore)
                 .onChange(async (value) => {
@@ -137,8 +130,8 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Dev Mode')
-            .setDesc('Enable Dev Mode')
+            .setName('Dev mode')
+            .setDesc('Enable development mode')
             .addToggle(toggle => toggle
                 .setValue(settings.devMode)
                 .onChange(async (value) => {
@@ -146,7 +139,7 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Clear Vault')
+            .setName('Clear vault')
             .setDesc('Delete all local files and data.')
             .addButton(button => button
                 .setButtonText('Clear')
@@ -155,7 +148,7 @@ export class SettingTab extends PluginSettingTab {
                 })
             );
         new Setting(containerEl)
-            .setName('Save Settings')
+            .setName('Save settings')
             .addButton(button => button
                 .setButtonText('Save & Restart')
                 .onClick(async () => {
