@@ -1,6 +1,6 @@
 import { Stat, arrayBufferToHex } from "obsidian";
 import pThrottle from "p-throttle";
-import { Commit, SeafFs } from "./server";
+import { Commit, DirSeafFs, FileSeafFs, MODE_FILE, SeafFs } from "./server";
 import { PlatformPath } from "path/posix";
 
 export const Path = (require("path-browserify").posix) as PlatformPath;
@@ -83,9 +83,13 @@ export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLi
     }
 }
 
-export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>, limit: number, interval: number, batchSize: number) {
-    type callback = { resolve: (value: T | undefined) => void, reject: (reason: any) => void };
-    let taskQueue: Map<K, { callback: callback, stack: string }[]> = new Map();
+export function packRequest<FuncParamType, FuncRetType>
+    (
+        packFunc: (funcParamArray: Array<FuncParamType>) => Promise<Map<FuncParamType, FuncRetType>>,
+        limit: number, interval: number, batchSize: number
+    ) {
+    type callback = { resolve: (value: FuncRetType) => void, reject: (reason: any) => void };
+    let taskQueue: Map<FuncParamType, { callback: callback, stack: string }[]> = new Map();
     const throttled = pThrottle({ limit, interval })(async () => {
 
 
@@ -94,7 +98,7 @@ export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>,
         let keys = Array.from(taskQueue.keys()).slice(0, batchSize);
         if (keys.length == 0) return;
 
-        let tasks: Map<K, { callback: callback, stack: string }[]> = new Map();
+        let tasks: Map<FuncParamType, { callback: callback, stack: string }[]> = new Map();
 
         for (let key of keys) {
             tasks.set(key, taskQueue.get(key)!);
@@ -104,7 +108,6 @@ export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>,
         let results;
         try {
             results = await packFunc(keys);
-            if (!results) throw new Error("packFunc returned undefined");
         }
         catch (e) {
             // packFunc failed, reject all tasks
@@ -120,9 +123,9 @@ export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>,
         // Resolve all tasks
         for (let [key, task] of tasks) {
             let result = results.get(key);
-            if (!result) {
+            if (result === undefined) {
                 for (let cb of task) {
-                    cb.callback.resolve(undefined);
+                    cb.callback.reject(new Error(`packFunc did not return a result for key ${key}`));
                 }
             }
             else {
@@ -133,31 +136,15 @@ export function packRequest<K, T>(packFunc: (k: Array<K>) => Promise<Map<K, T>>,
         }
     });
 
-    return (key: K): Promise<T | undefined> => {
+    return (key: FuncParamType): Promise<FuncRetType> => {
         let stack = new Error().stack ?? "";
-        return new Promise<T | undefined>((resolve, reject) => {
+        return new Promise<FuncRetType>((resolve, reject) => {
             if (!taskQueue.has(key)) taskQueue.set(key, []);
             taskQueue.get(key)!.push({ callback: { resolve, reject }, stack: stack });
             throttled();
         });
     }
 }
-
-
-// export async function getUniqueLocalPath(path: string) {
-//     let baseDir = Path.dirname(path);
-//     let ext = Path.extname(path);
-//     let fileName = Path.basename(path).slice(0, -ext.length);
-
-//     let i = 0;
-//     while (await app.vault.adapter.exists(path)) {
-//         i++;
-//         path = `${baseDir}/${fileName}(${i})${ext}`;
-//     }
-
-//     path = path.replace(/^\/+/g, '');
-//     return path;
-// }
 
 export function strcmp(str1: string, str2: string) {
     return ((str1 == str2) ? 0 : ((str1 > str2) ? 1 : -1));
@@ -173,19 +160,15 @@ export function sha1(data: ArrayBuffer | string) {
     });
 }
 
-export function seafileStringify(obj: any) {
-    // sort keys
-    const sortedObj = Object.keys(obj).sort(strcmp).reduce((result, key) => {
-        result[key] = obj[key];
-        return result;
-    }, {} as any);
-
-    return JSON.stringify(sortedObj).replace(/:/g, ": ").replace(/,/g, ", ");
+export function stringifySeafFs(fs: SeafFs): string {
+    // Stringify, add space after colons and commas
+    let str = JSON.stringify(fs, null, "/");
+    str = str.replace(/\//g, "").replace(/,\n/g, ", ").replace(/\n/g, "");
+    return str;
 }
 
 export async function computeFsId(fs: SeafFs): Promise<string> {
-    delete (fs as any).fsId;
-    let str = seafileStringify(fs);
+    let str = stringifySeafFs(fs);
     let fsId = await sha1(str);
     return fsId;
 }

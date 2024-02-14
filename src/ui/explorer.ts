@@ -52,9 +52,11 @@ export class ExplorerView {
         const item = this.fileItems[path];
         if (item) {
             await this.renderFileItem(item, node.state);
+            // debug.log("Rendered state update", path, node.state);
         }
         else {
             this.statesBuffer.set(path, node.state);
+            // debug.log("Buffering state update", path, node.state);
         }
     }
 
@@ -63,7 +65,6 @@ export class ExplorerView {
             await this.renderFileItem(item, this.statesBuffer.get(path)!);
         }
         else {
-            // debug.log("No state found for", path);
             await this.renderFileItem(item, { type: "init" });
         }
     }

@@ -29,9 +29,7 @@ export default class SeafilePlugin extends Plugin {
 		);
 
 		try {
-			debug.log('Seafile plugin loaded');
 			await this.server.login();
-			debug.log('Seafile plugin logged in');
 		}
 		catch (e) {
 			new Notice('Failed to login to Seafile server: ' + e.message, 10000);
@@ -43,8 +41,10 @@ export default class SeafilePlugin extends Plugin {
 
 	private async afterLogin() {
 		this.sync = new SyncController(this.settings.interval, this.server, this.settings.ignore);
-		await this.sync.init();
 		this.explorerView = new ExplorerView(this, this.sync);
+		debug.time("Load SyncNodes");
+		await this.sync.init();
+		debug.timeEnd("Load SyncNodes");
 
 		if (this.settings.devMode) {
 			this.addRibbonIcon("dice", "Clear Vault", async () => {
@@ -77,6 +77,21 @@ export default class SeafilePlugin extends Plugin {
 			disableDebug();
 			await this.sync.startSync();
 		}
+
+
+		this.registerEvent(this.app.vault.on("create", (file) => {
+			this.sync.notifyChange("/" + file.path, "create");
+		}));
+		this.registerEvent(this.app.vault.on("delete", (file) => {
+			this.sync.notifyChange("/" + file.path, "delete");
+		}));
+		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+			this.sync.notifyChange("/" + oldPath, "delete");
+			this.sync.notifyChange("/" + file.path, "create");
+		}));
+		this.registerEvent(this.app.vault.on("modify", (file) => {
+			this.sync.notifyChange("/" + file.path, "modify");
+		}));
 	}
 
 	onunload() {

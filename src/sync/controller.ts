@@ -1,13 +1,18 @@
 import { assert } from "console";
 import * as IgnoreParser from 'gitignore-parser';
-import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
+import Server, { CommitChanges, DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
 import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedListener } from "./node";
 import * as utils from "../utils";
 import { debug } from "../utils";
-import { HEAD_COMMIT_PATH } from "../config";
-import { Platform, Plugin } from "obsidian";
+import { HEAD_COMMIT_PATH, PLUGIN_DIR } from "../config";
+import { Notice, Platform, Plugin } from "obsidian";
 
 const adapter = app.vault.adapter;
+
+type NodeChange = {
+    node: SyncNode;
+    type: "add" | "remove-file" | "remove-folder" | "modify";
+}
 
 export class SyncController {
     private account: string;
@@ -24,7 +29,7 @@ export class SyncController {
         private ignorePattern: string = "") {
 
         this.account = server.getAccount();
-        const selfIgnorePath = '/.obsidian/plugins/obsidian-seafile';
+        const selfIgnorePath = PLUGIN_DIR;
         this.ignore = IgnoreParser.compile(ignorePattern);
         if (this.ignore.accepts(selfIgnorePath)) {
             this.ignore = IgnoreParser.compile(this.ignorePattern + '\n' + selfIgnorePath);
@@ -37,33 +42,43 @@ export class SyncController {
     }
 
     async downloadFile(path: string, fsId: string, mtime: number) {
-        mtime = mtime * 1000;
-        await adapter.write(path, "");
+        this.ignoreChange.add(path);
+        try {
+            mtime = mtime * 1000;
+            await adapter.write(path, "");
 
-        if (fsId == ZeroFs) {
-            await adapter.write(path, "", { mtime });
-            return;
-        }
-
-        let nativePath = undefined;
-        if (Platform.isMobile) {
-            nativePath = (app.vault.adapter as any).getNativePath(path)
-        }
-
-        const fs = await this.server.getFs(fsId) as FileSeafFs;
-        for (let blockId of fs.block_ids) {
-            const block = await this.server.getBlock(blockId);
-            if (Platform.isDesktop) {
-                await app.vault.adapter.append(path, new DataView(block) as unknown as string, { mtime })
+            if (fsId == ZeroFs) {
+                await adapter.write(path, "", { mtime });
+                return;
             }
-            else {
-                // Platform is mobile
-                // Encode array buffer to base64 string
-                let encoded = await utils.arrayBufferToBase64(block);
-                // Append to file
-                // Hacky way to get the filesystem plugin
-                await (window.top as any).Capacitor.Plugins.Filesystem.appendFile({ path: nativePath, data: encoded });
+
+            let nativePath = undefined;
+            if (Platform.isMobile) {
+                nativePath = (adapter as any).getNativePath(path)
             }
+
+            const [, fs] = await this.server.getFs(fsId);
+            for (let blockId of (fs as FileSeafFs).block_ids) {
+                const block = await this.server.getBlock(blockId);
+                if (Platform.isDesktop) {
+                    await adapter.append(path, new DataView(block) as unknown as string, { mtime })
+                }
+                else {
+                    // Platform is mobile
+                    // Encode array buffer to base64 string
+                    let encoded = await utils.arrayBufferToBase64(block);
+                    // Append to file
+                    // Hacky way to get the filesystem plugin
+                    await (window.top as any).Capacitor.Plugins.Filesystem.appendFile({ path: nativePath, data: encoded });
+                }
+            }
+
+            if (Platform.isMobile) {
+                await adapter.append(path, "", { mtime }); // Set mtime
+            }
+        }
+        finally {
+            this.ignoreChange.delete(path);
         }
     }
 
@@ -72,7 +87,7 @@ export class SyncController {
         this.onNodeStateChanged?.(node);
     }
 
-    public async pull(uploads: Set<SyncNode>, path: string, node: SyncNode, remote?: SeafDirent) {
+    public async pull(changes: NodeChange[], path: string, node: SyncNode, remote?: SeafDirent) {
         // Step 0. Check ignore pattern
         if (this.ignore.denies(path)) {
             if (remote) {
@@ -97,11 +112,16 @@ export class SyncController {
         if (
             (!local && !remote) ||
             (node && node.prev && remote && node.prevDirty === false && node.prev.id === remote.id) ||
-            (local && remote && local.mtime === remote.mtime * 1000 && local.type == "file" && remote.mode == MODE_FILE && local.size === remote.size)
+            (local && remote && Math.floor(local.mtime / 1000) === remote.mtime && local.type == "file" && remote.mode == MODE_FILE && local.size === remote.size)
         ) {
             target = "same";
-            await node.setPrevAsync(remote!, false);
-            node.state = { type: "sync" };
+            if (local || remote) {
+                await node.setPrevAsync(remote, false);
+                node.state = { type: "sync" };
+            }
+            else {
+                await node.delete();
+            }
             return;
         }
         // Local:
@@ -127,8 +147,8 @@ export class SyncController {
         }
 
         // Merge:
-        // Both are folders
-        else if (local && remote && local.type == "folder" && remote.mode == MODE_DIR) {
+        // Neither is a file
+        else if (local?.type !== "file" && remote?.mode !== MODE_FILE) {
             target = "merge";
         }
         // Conflict:
@@ -137,13 +157,17 @@ export class SyncController {
             target = "conflict";
         }
 
-
-
         // Step 2. Resolve conflicts
-        if (target == "conflict")
-            throw new Error("To do: resolve conflicts.");
-
-
+        if (target == "conflict") {
+            // Only one side exists
+            if (local && !remote) target = "local";
+            else if (!local && remote) target = "remote";
+            else {
+                // Take the newer one
+                if (Math.floor(local!.mtime / 1000) > remote!.mtime) target = "local";
+                else target = "remote";
+            }
+        }
 
         // Step 3. Update and merge
         // 3.1 Branching
@@ -159,9 +183,10 @@ export class SyncController {
             }
         }
         if ((target == "remote" || target == "merge") && remote && remote.mode == MODE_DIR) {
-            const fs = (await this.server.getFs(remote.id)) as (DirSeafFs | ZeroFs);
+            let [, fs] = await this.server.getFs(remote.id);
+            fs = fs as DirSeafFs;
             if (!newChildrenNames) newChildrenNames = new Set();
-            if (fs !== ZeroFs) {
+            if (fs) {
                 for (let dirent of fs.dirents) {
                     newRemote[dirent.name] = dirent;
                     newChildrenNames.add(dirent.name);
@@ -189,7 +214,7 @@ export class SyncController {
 
                 promises.push(
                     this.pull(
-                        uploads,
+                        changes,
                         path + "/" + name,
                         nodeChild,
                         remoteChild
@@ -199,7 +224,26 @@ export class SyncController {
 
             // After pulling children, merge status is changed to local
             if (target == "merge") {
-                target = "local";
+                if (Object.keys(nodeChildren).length === 0) {
+                    // Merge result is an empty folder
+                    if (!remote) {
+                        await adapter.rmdir(path, true);
+                        await node.delete();
+                        changes.push({ node, type: "remove-folder" });
+                        return;
+                    }
+                    else {
+                        // Local not exist
+                        await adapter.mkdir(path);
+                        await node.setPrevAsync(remote, false);
+                        node.state = { type: "sync" };
+                        return;
+                    }
+                }
+                else {
+                    // Merge result is a non-empty folder, use local to compute new fs and dirent
+                    target = "local";
+                }
             }
         }
 
@@ -214,11 +258,12 @@ export class SyncController {
                         await adapter.rmdir(path, true);
                     }
                 }
-                node.delete();
+                await node.delete();
                 return;
             }
             else {
                 if (remote.mode == MODE_FILE) {
+                    node.state = { type: "download", param: 0 };
                     await this.downloadFile(path, remote.id, remote.mtime);
                     await node.setPrevAsync(remote, false);
                     node.state = { type: "sync" };
@@ -233,20 +278,26 @@ export class SyncController {
 
         if (target == "local") {
             if (!local) {
-                node.delete();
+                if (remote!.mode == MODE_FILE) {
+                    changes.push({ node, type: "remove-file" });
+                }
+                else {
+                    changes.push({ node, type: "remove-folder" });
+                }
+                await node.delete();
                 return;
             }
             else if (local.type === "file") {
                 const [dirent, fs, blocks] = await this.computeFileDirent(path, this.account);
-                node.setNext(dirent, true);
+                node.setNext(dirent, false);
                 node.state = { type: "upload", param: { progress: 0, fs, blocks } };
-                uploads.add(node);
+                changes.push({ node, type: remote ? "modify" : "add" });
                 return;
             }
         }
 
         // Recomputing dirent and fs base on current local folder
-        const mtime = node?.prev?.mtime;
+        const mtime = (remote?.mtime) ?? (node?.prev?.mtime);
         let dirents = [];
         for (let child of Object.values(nodeChildren)) {
             if (child.next) dirents.push(child.next);
@@ -263,20 +314,22 @@ export class SyncController {
         else {
             node.setNext(dirent, false);
             node.state = { type: "upload", param: { progress: 0, fs } };
-            uploads.add(node);
-            debug.log(`Upload ${path}.`, fs, node.prev ? await this.server.getFs(node.prev.id) : null);
+            changes.push({ node, type: remote ? "modify" : "add" });
+            debug.log(`Upload "${path}"`);
+            debug.log([dirent.id, fs], remote ? await this.server.getFs(remote.id) : null);
+            return;
         }
     }
 
-    async computeFileDirent(path: string, modifier: string): Promise<[FileSeafDirent, SeafFs, Record<string, ArrayBuffer>]> {
+    async computeFileDirent(path: string, modifier: string): Promise<[FileSeafDirent, SeafFs | null, Record<string, ArrayBuffer>]> {
         const stat = await adapter.stat(path);
         if (!stat) throw new Error("Cannot compute fs of non-existent file");
 
         const blockBuffer: Record<string, ArrayBuffer> = {};
-        let fsId: string, fs: SeafFs;
+        let fsId: string, fs: SeafFs | null;
 
         if (stat.size == 0) {
-            [fsId, fs] = [ZeroFs, ZeroFs];
+            [fsId, fs] = [ZeroFs, null];
         }
         else {
             // to do: warn if file too large
@@ -312,10 +365,10 @@ export class SyncController {
         return [dirent, fs, blockBuffer];
     }
 
-    async createDirFs(children: SeafDirent[]): Promise<[string, SeafFs]> {
+    async createDirFs(children: SeafDirent[]): Promise<[string, SeafFs | null]> {
         let count = Object.keys(children).length;
         if (count === 0)
-            return [ZeroFs, ZeroFs];
+            return [ZeroFs, null];
 
         let childrenDirents = Object.values(children);
 
@@ -332,7 +385,7 @@ export class SyncController {
         return [fsId, fs];
     }
 
-    async computeDirDirent(path: string, children: SeafDirent[], defaultMtime?: number): Promise<[DirSeafDirent, SeafFs]> {
+    async computeDirDirent(path: string, children: SeafDirent[], defaultMtime?: number): Promise<[DirSeafDirent, SeafFs | null]> {
         const name = utils.Path.basename(path);
 
 
@@ -389,16 +442,17 @@ export class SyncController {
         return blocks;
     }
 
-    async push(nodeRoot: SyncNode, uploads: Set<SyncNode>, parentCommitId: string): Promise<string> {
+    async push(nodeRoot: SyncNode, changes: NodeChange[], parentCommitId: string): Promise<string> {
         if (!nodeRoot.next) {
             debug.log("Nothing to push");
             return parentCommitId;
         }
 
+        const uploads = changes.filter(change => change.type == "add" || change.type == "modify").map(change => change.node);
         // Upload fs
-        await Promise.all([...uploads].map(async (node) => {
+        await Promise.all(uploads.map(async (node) => {
             if (node.state.type !== "upload" || !node.next) {
-                throw Error("Node is not ready for upload")
+                throw Error("Node is not in upload state or has no next");
             }
 
             const param = (node.state as STATE_UPLOAD).param;
@@ -408,12 +462,23 @@ export class SyncController {
                         await this.server.sendBlock(blockId, block);
                 }));
             }
-            if (await this.server.checkFs(node.next.id))
+            if (param.fs && await this.server.checkFs(node.next.id))
                 await this.server.sendFs([node.next.id, param.fs])
         }));
 
         // Create commit
-        const commit = await this.server.createCommit(nodeRoot.next.id, "No Description", parentCommitId);
+
+        // Create commit description
+        const description = this.server.describeCommit({
+            addedFiles: changes.filter(c => c.type == "add" && c.node.next!.mode == MODE_FILE).map(c => c.node.name),
+            removedFiles: changes.filter(c => c.type == "remove-file").map(c => c.node.name),
+            modifiedFiles: changes.filter(c => c.type == "modify" && c.node.next!.mode == MODE_FILE).map(c => c.node.name),
+            addedDirectories: changes.filter(c => c.type == "add" && c.node.next!.mode == MODE_DIR).map(c => c.node.name),
+            removedDirectories: changes.filter(c => c.type == "remove-folder").map(c => c.node.name),
+            renamedFiles: [],
+            renamedDirectories: []
+        })
+        const commit = await this.server.createCommit(nodeRoot.next.id, description, parentCommitId);
         await this.server.uploadCommit(commit);
         await this.server.setHeadCommit(commit.commit_id);
 
@@ -425,7 +490,10 @@ export class SyncController {
         return commit.commit_id;
     }
 
+    private ignoreChange = new Set<string>();
     async notifyChange(path: string, type: "create" | "modify" | "delete") {
+        if (this.ignoreChange.has(path)) return;
+
         if (type == "create") {
             if (this.nodeRoot.find(path)) return;
         }
@@ -454,20 +522,14 @@ export class SyncController {
             }
         }
 
-        const uploads = new Set<SyncNode>();
+        const changes: NodeChange[] = [];
         const remoteHead = await this.server.getHeadCommitId();
         const remoteRoot = await this.server.getCommitRoot(remoteHead);
 
-        debug.time("Pull");
-        await this.pull(uploads, "", this.nodeRoot, remoteRoot);
-        debug.timeEnd("Pull");
-
+        await this.pull(changes, "", this.nodeRoot, remoteRoot);
         await this.setLocalHeadAsync(remoteHead);
 
-        debug.time("Push");
-        const newHead = await this.push(this.nodeRoot, uploads, this.localHead);
-        debug.timeEnd("Push");
-
+        const newHead = await this.push(this.nodeRoot, changes, this.localHead);
         await this.setLocalHeadAsync(newHead);
     }
 
@@ -495,13 +557,17 @@ export class SyncController {
     async syncCycle() {
         if (this.status == "idle") {
             this.status = "busy";
+
+            debug.time("Sync")
             try {
                 await this.sync();
             }
             catch (e) {
                 debug.error(e);
                 this.status = "pendingStop";
+                new Notice(`Sync failed: ${e.message}`);
             }
+            debug.timeEnd("Sync")
 
             if (this.status as any != "pendingStop") {
                 this.status = "idle";
