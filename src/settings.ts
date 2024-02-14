@@ -151,7 +151,7 @@ export class SettingTab extends PluginSettingTab {
             .addButton(button => button
                 .setButtonText('Clear')
                 .onClick(async () => {
-                    await this.plugin.clearVault();
+                    await this.askClearVault();
                 })
             );
         new Setting(containerEl)
