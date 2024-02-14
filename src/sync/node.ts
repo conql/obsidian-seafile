@@ -1,5 +1,5 @@
 import { DATA_DIR } from "../config";
-import { MODE_FILE, SeafDirent, SeafFs } from "../server";
+import { FileSeafDirent, MODE_FILE, SeafDirent, SeafFs } from "../server";
 import * as utils from "../utils";
 import { debug } from "../utils";
 
@@ -11,7 +11,7 @@ export type STATE_UPLOAD = {
     type: "upload",
     param: {
         progress: number,
-        fs: SeafFs,
+        fs: SeafFs | null,
         blocks?: Record<string, ArrayBuffer>
     }
 }
@@ -72,22 +72,39 @@ export class SyncNode {
             node.prevDirty = true;
 
             const children = await adapter.list(realPath);
+            let childrenDirty = false;
 
             for (let childPath of children.folders) {
                 const child = await SyncNode.loadPath(onStateChanged, childPath, node);
                 node.addChild(child);
+                if (child.prevDirty) childrenDirty = true;
             }
 
             for (let childPath of children.files) {
                 const childName = utils.Path.basename(childPath);
                 if (childName === "metadata.json") continue;
-                const childPrev: SeafDirent = JSON.parse(await adapter.read(realPath + "/" + childName));
+                const childPrev: FileSeafDirent = JSON.parse(await adapter.read(realPath + "/" + childName));
+                const stat = await adapter.stat(childPath);
                 const child = new SyncNode(childPrev.name, onStateChanged, node);
                 child.prev = childPrev;
-                child.prevDirty = true;
+                child.prevDirty =
+                    (
+                        stat != null &&
+                        Math.floor(stat.mtime / 1000) === childPrev.mtime &&
+                        stat.size === childPrev.size
+                    )
+                if (child.prevDirty)
+                    childrenDirty = true;
+                else {
+                    child.state = { "type": "sync" }
+                }
                 node.addChild(child);
             }
 
+            if (!childrenDirty) {
+                node.prevDirty = false;
+                node.state = { "type": "sync" }
+            }
             return node;
         }
         catch (e) {
@@ -97,11 +114,11 @@ export class SyncNode {
         }
     }
 
-    private async savePrev() {
+    private async saveDirent(dirent: SeafDirent | undefined) {
         const escapedPath = this.path.replace(/metadata.json$/, "#metadata.json");
         const savePath = DATA_DIR + escapedPath;
 
-        if (!this.prev) {
+        if (!dirent) {
             // Delete
             const stat = await adapter.stat(savePath);
             if (stat?.type == "file") {
@@ -112,14 +129,14 @@ export class SyncNode {
             }
         }
         else {
-            if (this.prev.mode == MODE_FILE) {
+            if (dirent.mode == MODE_FILE) {
                 const baseFolder = savePath.slice(0, savePath.lastIndexOf("/"));
                 if (!await adapter.exists(baseFolder)) await adapter.mkdir(baseFolder);
-                await adapter.write(savePath, JSON.stringify(this.prev));
+                await adapter.write(savePath, JSON.stringify(dirent));
             }
             else {
                 if (!await adapter.exists(savePath)) await adapter.mkdir(savePath);
-                await adapter.write(savePath + "/metadata.json", JSON.stringify(this.prev));
+                await adapter.write(savePath + "/metadata.json", JSON.stringify(dirent));
             }
         }
     }
@@ -182,6 +199,7 @@ export class SyncNode {
             if (node.next) {
                 node.nextDirty = true;
             }
+            node.state = { "type": "init" }
 
             return false;
         }, "post", false);
@@ -224,10 +242,8 @@ export class SyncNode {
 
     async setPrevAsync(prev?: SeafDirent, dirty = true) {
         this.prevDirty = dirty;
-        if (this.prev?.id !== prev?.id) {
-            this.prev = prev;
-            await this.savePrev();
-        }
+        this.prev = prev;
+        await this.saveDirent(this.prev);
     }
 
     async applyNext() {
@@ -246,11 +262,7 @@ export class SyncNode {
         if (this.parent) {
             this.parent.removeChild(this);
         }
-
-        if (this.prev) {
-            await this.setPrevAsync(undefined, true);
-        }
-
+        await this.setPrevAsync(undefined, true);
         this.state = { "type": "delete" }
     }
 

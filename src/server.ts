@@ -1,14 +1,14 @@
 import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
 import pRetry from "p-retry";
+import pThrottle from "p-throttle";
 import * as utils from "./utils";
 const pako = require('pako');
 const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
 
 
 export const ZeroFs = "0000000000000000000000000000000000000000";
-export type ZeroFs = "0000000000000000000000000000000000000000";
-export type SeafFs = FileSeafFs | DirSeafFs | ZeroFs;
-
+export type SeafFs = FileSeafFs | DirSeafFs;
+export type SeafFsResult = [string, SeafFs | null];
 
 export type MODE_FILE = 33188;
 export type MODE_DIR = 16384;
@@ -112,6 +112,16 @@ export interface DirInfo {
     modifier_name?: string,
 }
 
+export type CommitChanges = {
+    addedFiles: string[];
+    removedFiles: string[];
+    renamedFiles: string[];
+    modifiedFiles: string[];
+    addedDirectories: string[];
+    removedDirectories: string[];
+    renamedDirectories: string[];
+};
+
 export default class Server {
     private authToken: string;
     private repoId: string;
@@ -138,13 +148,14 @@ export default class Server {
         return requestUrl(req);
     }
 
+    private requestThrottled = pThrottle({ interval: 1000, limit: 15 })(this.request);
     async sendRequest(param: RequestParam) {
         let req: RequestUrlParam & RequestParam = { ...param };
         req.throw = false;
         req.retry = req.retry || 1;
         req.method = req.method || "GET";
 
-        let resp = await pRetry(async () => { return this.request(req); }, { retries: param.retry });
+        let resp = await pRetry(async () => this.requestThrottled(req), { retries: param.retry });
         let status = resp.status.toString();
         let ret = null;
 
@@ -422,6 +433,44 @@ export default class Server {
         return commit;
     }
 
+    describeCommit(changes: CommitChanges): string {
+        let summary = '';
+
+        // Helper function to format messages
+        const formatChange = (count: number, entity: string, isDirectory: boolean = false) => {
+            const entityStr = isDirectory ? "directory " : "";
+            if (count === 1) {
+                return `${entityStr}"${entity}".\n`;
+            } else {
+                return `${entityStr}"${entity}" and ${count - 1} more ${isDirectory ? "directories" : "files"}.\n`;
+            }
+        };
+
+        if (changes.addedFiles.length > 0) {
+            summary += "Added " + formatChange(changes.addedFiles.length, changes.addedFiles[0]);
+        }
+        if (changes.modifiedFiles.length > 0) {
+            summary += "Modified " + formatChange(changes.modifiedFiles.length, changes.modifiedFiles[0]);
+        }
+        if (changes.removedFiles.length > 0) {
+            summary += "Deleted " + formatChange(changes.removedFiles.length, changes.removedFiles[0]);
+        }
+        if (changes.renamedFiles.length > 0) {
+            summary += "Renamed " + formatChange(changes.renamedFiles.length, changes.renamedFiles[0]);
+        }
+        if (changes.addedDirectories.length > 0) {
+            summary += "Added " + formatChange(changes.addedDirectories.length, changes.addedDirectories[0], true);
+        }
+        if (changes.removedDirectories.length > 0) {
+            summary += "Removed " + formatChange(changes.removedDirectories.length, changes.removedDirectories[0], true);
+        }
+        if (changes.renamedDirectories.length > 0) {
+            summary += "Renamed " + formatChange(changes.renamedDirectories.length, changes.renamedDirectories[0], true);
+        }
+
+        return summary.trim();
+    }
+
     async uploadCommit(commit: Commit) {
         await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/${commit.commit_id}`, method: "PUT", body: JSON.stringify(commit), retry: 0, responseType: "text" });
     }
@@ -434,12 +483,12 @@ export default class Server {
         await this.requestAPIv21({ url: `repos/${this.repoId}/commits/${commit_id}/revert/`, method: "POST" });
     }
 
-    async getPackFs(fsList: string[]): Promise<Map<string, SeafFs>> {
-        let result: Map<string, SeafFs> = new Map();
+    async getPackFs(fsList: string[]): Promise<Map<string, SeafFsResult>> {
+        let result: Map<string, SeafFsResult> = new Map();
 
         fsList = fsList.filter(id => {
             if (id == ZeroFs) {
-                result.set(id, ZeroFs);
+                result.set(id, [ZeroFs, null]);
                 return false;
             }
             return true;
@@ -456,36 +505,45 @@ export default class Server {
 
         const utf8Decoder = new TextDecoder('utf-8');
         while (data.byteLength > 0) {
-            let id: string = utf8Decoder.decode(data.slice(0, 40));
-            let size: number = new DataView(data.slice(40, 44)).getUint32(0, false)
-            let content: ArrayBuffer = data.slice(44, 44 + size);
-            let decompressed = pako.inflate(content);
-            let text = utf8Decoder.decode(decompressed);
-            let fs = { ...JSON.parse(text), fsId: id };
-            result.set(id, fs);
+            const id = utf8Decoder.decode(data.slice(0, 40));
+            const size = new DataView(data.slice(40, 44)).getUint32(0, false)
+            const content: ArrayBuffer = data.slice(44, 44 + size);
+            const decompressed = pako.inflate(content);
+            const text = utf8Decoder.decode(decompressed);
+            const fs = JSON.parse(text) as SeafFs;
+            result.set(id, [id, fs]);
             data = data.slice(44 + size);
         }
         return result;
     }
-    getFs = utils.memoizeWithLimit<[fs: string], SeafFs | undefined>(
-        utils.packRequest<string, SeafFs>(this.getPackFs.bind(this), 10, 200, 100)
+    getFs = utils.memoizeWithLimit<[fs: string], SeafFsResult>(
+        utils.packRequest<string, SeafFsResult>(this.getPackFs.bind(this), 10, 200, 100)
         , 1000);
 
-    async sendPackFs(fsList: [fsId: string, fs: SeafFs][]): Promise<Map<any, any>> {
+    async sendPackFs(fsList: SeafFsResult[]): Promise<Map<SeafFsResult, boolean>> {
+        let result = new Map<SeafFsResult, boolean>();
+
         // Prepare fs data
         const utf8Encoder = new TextEncoder();
         let data = new Uint8Array();
-        for (let [fsId, fs] of fsList) {
-            const fsJson = utils.seafileStringify(fs);
-            const compressed = pako.deflate(fsJson);
-            const idData = utf8Encoder.encode(fsId);
-            const sizeBuffer = new ArrayBuffer(4);
-            new DataView(sizeBuffer).setUint32(0, compressed.byteLength);
-            const combinedData = new Uint8Array(idData.byteLength + sizeBuffer.byteLength + compressed.byteLength);
-            combinedData.set(new Uint8Array(idData), 0);
-            combinedData.set(new Uint8Array(sizeBuffer), idData.byteLength);
-            combinedData.set(new Uint8Array(compressed), idData.byteLength + sizeBuffer.byteLength);
-            data = utils.concatTypedArrays(data, combinedData);
+        for (let task of fsList) {
+            const [fsId, fs] = task;
+            if (!fs) {
+                result.set(task, false);
+            }
+            else {
+                result.set(task, true);
+                const fsJson = utils.stringifySeafFs(fs);
+                const compressed = pako.deflate(fsJson);
+                const idData = utf8Encoder.encode(fsId);
+                const sizeBuffer = new ArrayBuffer(4);
+                new DataView(sizeBuffer).setUint32(0, compressed.byteLength);
+                const combinedData = new Uint8Array(idData.byteLength + sizeBuffer.byteLength + compressed.byteLength);
+                combinedData.set(new Uint8Array(idData), 0);
+                combinedData.set(new Uint8Array(sizeBuffer), idData.byteLength);
+                combinedData.set(new Uint8Array(compressed), idData.byteLength + sizeBuffer.byteLength);
+                data = utils.concatTypedArrays(data, combinedData);
+            }
         }
 
         // Send fs data
@@ -505,18 +563,17 @@ export default class Server {
             throw new Error(`Failed to send pack fs: HTTP ${resp.status}`);
         }
 
-        return new Map();
+        return result;
     }
     sendFs = utils.packRequest<[string, SeafFs], void>(this.sendPackFs.bind(this), 1, 300, 1000);
 
-
     // check if the fs are in the server
     async checkFsList(fsList: string[]): Promise<Map<string, boolean>> {
+        const result = new Map<string, boolean>(fsList.map((fsId: string) => [fsId, false]));
         const resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/check-fs/`, method: "POST", body: JSON.stringify(fsList), retry: 0 });
         // resp is an array of not found fs
-        const map = new Map<string, boolean>(resp.map((fsId: string) => [fsId, false]));
-        resp.forEach((fsId: string) => map.set(fsId, true));
-        return map;
+        resp.forEach((fsId: string) => result.set(fsId, true));
+        return result;
     }
     checkFs = utils.packRequest<string, boolean>(this.checkFsList.bind(this), 1, 300, 1000);
 
