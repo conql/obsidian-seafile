@@ -103,7 +103,7 @@ export class ExplorerView {
         const wrapper = item.iconWrapper;
         if (state.type === "sync") {
             // setIcon(wrapper, "check-circle-2");
-            wrapper.innerHTML = "";
+            wrapper.textContent = "";
         }
         else if (state.type === "upload") {
             setIcon(wrapper, "upload-cloud");
@@ -117,7 +117,7 @@ export class ExplorerView {
             // wrapper.appendText(` ${progress}%`);
         }
         else {
-            wrapper.innerHTML = state.type;
+            wrapper.textContent = state.type;
         }
         wrapper.setAttribute("state", state.type);
     }

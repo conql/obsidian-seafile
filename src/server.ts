@@ -4,7 +4,7 @@ import pThrottle from "p-throttle";
 import pTimeout from "p-timeout";
 import * as utils from "./utils";
 const pako = require('pako');
-const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
+const manifestJson = require('../manifest.json') ?? { id: "seafile", version: "0.0.0" };
 
 
 export const ZeroFs = "0000000000000000000000000000000000000000";
@@ -148,7 +148,7 @@ export default class Server {
 
 
     request(req: RequestUrlParam & RequestParam): RequestUrlResponsePromise {
-        return pTimeout(requestUrl(req), { milliseconds: 120 * 1000 }) as any as RequestUrlResponsePromise;
+        return pTimeout(requestUrl(req), { milliseconds: 120 * 1000 }) as unknown as RequestUrlResponsePromise;
     }
 
     private requestThrottled = pThrottle({ interval: 1000, limit: 15 })(this.request);
@@ -427,7 +427,7 @@ export default class Server {
             repo_name: this.repoName,
             repo_desc: "",
             device_name: this.deviceName,
-            client_version: `${manifestJson.id}-${manifestJson.version}`,
+            client_version: `obsidian-seafile_${manifestJson.version}`,
             version: 1
         };
         const commit_id = await utils.computeCommitId(commit);

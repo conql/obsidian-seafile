@@ -9,7 +9,7 @@ import { Notice, Platform, Plugin } from "obsidian";
 
 const adapter = app.vault.adapter;
 
-type NodeChange = {
+export type NodeChange = {
     node: SyncNode;
     type: "add" | "remove-file" | "remove-folder" | "modify";
 }
@@ -609,7 +609,7 @@ export class SyncController {
             }
             debug.timeEnd("Sync")
 
-            if (this.status as any != "pendingStop") {
+            if (this.status.type != "pendingStop") {
                 this.status = { type: "idle" };
                 this.timeoutId = setTimeout(() => {
                     this.syncCycle();

@@ -241,7 +241,7 @@ export function splitFirstSlash(path: string) {
     return [first, rest];
 }
 
-export let debug: Console = {} as any;
+export let debug: Console = {} as Console;
 for (let key in console) {
     if (typeof (console as any)[key] == "function") {
         (debug as any)[key] = (console as any)[key].bind(console);
