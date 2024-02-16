@@ -3,7 +3,7 @@ import SeafilePlugin from "./main";
 import Dialog from "./ui/dialog";
 import { debug } from "./utils";
 
-const manifestJson = require('../manifest.json') ?? { id: "obsidian-seafile", version: "0.0.0" };
+const manifestJson = require('../manifest.json') ?? { id: "seafile", version: "0.0.0" };
 
 export interface Settings {
     host: string,
@@ -153,8 +153,8 @@ export class SettingTab extends PluginSettingTab {
                 .setButtonText('Save & Restart')
                 .onClick(async () => {
                     await saveSettings(settings, this.plugin)
-                    await (app as any).plugins.disablePlugin("obsidian-seafile");
-                    await (app as any).plugins.enablePlugin("obsidian-seafile");
+                    await (app as any).plugins.disablePlugin("seafile");
+                    await (app as any).plugins.enablePlugin("seafile");
                 })
             );
     }

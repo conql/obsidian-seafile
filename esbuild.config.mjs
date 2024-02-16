@@ -52,7 +52,7 @@ const context = await esbuild.context({
 		{
 			name: "post-build",
 			setup(build) {
-				let appSettings = "";
+				let appSettings = {};
 				build.onStart(() => {
 					if (fs.existsSync("vault/.obsidian/plugins/obsidian-seafile/data.json"))
 						appSettings = JSON.parse(fs.readFileSync("vault/.obsidian/plugins/obsidian-seafile/data.json", "utf-8"));
@@ -69,13 +69,13 @@ const context = await esbuild.context({
 						fs.writeFileSync("dist/.hotreload", "");
 					}
 					fs.copyFileSync("manifest.json", "dist/manifest.json");
-					fs.writeFileSync("dist/data.json", JSON.stringify(appSettings));
 
 					// Copy dist folder to test vault
 					const testVaultPath = "vault/.obsidian/plugins/obsidian-seafile";
 					if (fs.existsSync(testVaultPath))
 						fs.rmSync(testVaultPath, { recursive: true, force: true });
 					fs.copySync("dist", testVaultPath);
+					fs.writeFileSync(testVaultPath + "/data.json", JSON.stringify(appSettings));
 				});
 			}
 		}],

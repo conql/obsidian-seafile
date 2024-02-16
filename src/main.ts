@@ -82,7 +82,7 @@ export default class SeafilePlugin extends Plugin {
 	}
 
 	async clearVault() {
-		await (app as any).plugins.disablePlugin("obsidian-seafile");
+		await (app as any).plugins.disablePlugin("seafile");
 
 		const root = await this.app.vault.adapter.list("");
 		for (const file of root.files) {
@@ -102,7 +102,7 @@ export default class SeafilePlugin extends Plugin {
 			await this.app.vault.adapter.remove(HEAD_COMMIT_PATH);
 		}
 
-		await (this.app as any).plugins.enablePlugin("obsidian-seafile");
+		await (this.app as any).plugins.enablePlugin("seafile");
 	}
 
 	onunload() {

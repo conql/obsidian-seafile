@@ -21,8 +21,9 @@ export function requestUrl(request: RequestUrlParam | string): RequestUrlRespons
     const ret = resp.then(async (resp) => {
         const arrayBuffer = await resp.arrayBuffer();
         const text = decoder.decode(arrayBuffer);
+        let json: any;
         try {
-            var json = JSON.parse(text);
+            json = JSON.parse(text);
         }
         catch (e) {
             json = {};

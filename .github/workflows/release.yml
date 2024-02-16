@@ -1,0 +1,69 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Read version from manifest
+        id: package_version
+        run: echo "::set-output name=VERSION::$(jq -r '.version' manifest.json)"
+        shell: bash
+      
+      - name: Delete existing release
+        id: check_release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const release = releases.find(release => release.tag_name === '${{ steps.package_version.outputs.VERSION }}');
+            if (release) {
+              console.log(`Release ${release.tag_name} exists. Deleting...`);
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+              });
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'tags/' + release.tag_name,
+              });
+              return true;
+            } else {
+              console.log('Release does not exist. Proceeding to create a new one.');
+              return false;
+            }
+
+      - name: Create release
+        id: create_release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.package_version.outputs.VERSION }}
+          artifacts: "dist/*"
+          prerelease: true

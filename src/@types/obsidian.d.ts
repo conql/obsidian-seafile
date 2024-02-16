@@ -43,6 +43,7 @@ declare module 'obsidian' {
 
 interface ExplorerLeaf extends WorkspaceLeaf {
   view: ExplorerView;
+  containerEl: HTMLElement;
 }
 
 interface DomChild {
