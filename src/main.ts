@@ -4,7 +4,7 @@ import Server from './server';
 import { SyncController } from './sync/controller';
 import { SyncNode } from './sync/node';
 import { debug, disableDebug } from './utils';
-import { DATA_DIR, HEAD_COMMIT_PATH } from './config';
+import { DATA_DIR, HEAD_COMMIT_PATH, setApp } from './config';
 import { ExplorerView } from './ui/explorer';
 import Dialog from './ui/dialog';
 
@@ -15,6 +15,7 @@ export default class SeafilePlugin extends Plugin {
 	explorerView: ExplorerView;
 
 	async onload() {
+		setApp(this.app);
 		(window as any)['seafile'] = this;
 
 		this.settings = await loadSettings(this);
@@ -42,7 +43,7 @@ export default class SeafilePlugin extends Plugin {
 	}
 
 	private async afterLogin() {
-		this.sync = new SyncController(this.settings.interval, this.server, this.settings.ignore);
+		this.sync = new SyncController(this.app.vault.adapter, this.settings.interval, this.server, this.settings.ignore);
 		this.explorerView = new ExplorerView(this, this.sync);
 		debug.time("Load SyncNodes");
 		await this.sync.init();
