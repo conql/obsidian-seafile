@@ -1,3 +1,4 @@
+import { DataAdapter } from "obsidian";
 import { DATA_DIR } from "../config";
 import { FileSeafDirent, MODE_FILE, SeafDirent, SeafFs } from "../server";
 import * as utils from "../utils";
@@ -29,8 +30,6 @@ export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC 
 
 export type SyncStateChangedListener = (node: SyncNode) => void;
 
-const adapter = app.vault.adapter;
-
 export class SyncNode {
     public readonly path: string;
     private children: Record<string, SyncNode> = {};
@@ -40,6 +39,7 @@ export class SyncNode {
     public nextDirty = true; // next means the pending upload state
 
     private constructor(
+        private adapter: DataAdapter,
         public readonly name: string,
         public onStateChanged: SyncStateChangedListener,
         public readonly parent?: SyncNode,
@@ -63,11 +63,11 @@ export class SyncNode {
         this.onStateChanged?.(this);
     }
 
-    public static async loadPath(onStateChanged: SyncStateChangedListener, realPath: string = DATA_DIR, parent?: SyncNode): Promise<SyncNode> {
+    public static async loadPath(adapter: DataAdapter, onStateChanged: SyncStateChangedListener, realPath: string = DATA_DIR, parent?: SyncNode): Promise<SyncNode> {
         let metadata: SeafDirent;
         try {
             metadata = JSON.parse(await adapter.read(realPath + "/metadata.json"));
-            const node = new SyncNode(metadata.name, onStateChanged, parent); // Use dirent name instead of path name
+            const node = new SyncNode(adapter, metadata.name, onStateChanged, parent); // Use dirent name instead of path name
             node.prev = metadata;
             node.prevDirty = true;
 
@@ -75,7 +75,7 @@ export class SyncNode {
             let childrenDirty = false;
 
             for (let childPath of children.folders) {
-                const child = await SyncNode.loadPath(onStateChanged, childPath, node);
+                const child = await SyncNode.loadPath(adapter, onStateChanged, childPath, node);
                 node.addChild(child);
                 if (child.prevDirty) childrenDirty = true;
             }
@@ -85,7 +85,7 @@ export class SyncNode {
                 if (childName === "metadata.json") continue;
                 const childPrev: FileSeafDirent = JSON.parse(await adapter.read(realPath + "/" + childName));
                 const stat = await adapter.stat(childPath);
-                const child = new SyncNode(childPrev.name, onStateChanged, node);
+                const child = new SyncNode(adapter, childPrev.name, onStateChanged, node);
                 child.prev = childPrev;
                 child.prevDirty =
                     (
@@ -110,7 +110,7 @@ export class SyncNode {
         catch (e) {
             const path = realPath.replace(DATA_DIR, "");
             debug.warn(`Cannot load metadata for "${path}", parent: ${parent?.name}`, e);
-            return new SyncNode(path.split("/").pop() || "", onStateChanged, parent);
+            return new SyncNode(adapter, path.split("/").pop() || "", onStateChanged, parent);
         }
     }
 
@@ -120,23 +120,23 @@ export class SyncNode {
 
         if (!dirent) {
             // Delete
-            const stat = await adapter.stat(savePath);
+            const stat = await this.adapter.stat(savePath);
             if (stat?.type == "file") {
-                await adapter.remove(savePath);
+                await this.adapter.remove(savePath);
             }
             else if (stat?.type == "folder") {
-                await adapter.rmdir(savePath, true);
+                await this.adapter.rmdir(savePath, true);
             }
         }
         else {
             if (dirent.mode == MODE_FILE) {
                 const baseFolder = savePath.slice(0, savePath.lastIndexOf("/"));
-                if (!await adapter.exists(baseFolder)) await adapter.mkdir(baseFolder);
-                await adapter.write(savePath, JSON.stringify(dirent));
+                if (!await this.adapter.exists(baseFolder)) await this.adapter.mkdir(baseFolder);
+                await this.adapter.write(savePath, JSON.stringify(dirent));
             }
             else {
-                if (!await adapter.exists(savePath)) await adapter.mkdir(savePath);
-                await adapter.write(savePath + "/metadata.json", JSON.stringify(dirent));
+                if (!await this.adapter.exists(savePath)) await this.adapter.mkdir(savePath);
+                await this.adapter.write(savePath + "/metadata.json", JSON.stringify(dirent));
             }
         }
     }
@@ -210,7 +210,7 @@ export class SyncNode {
     }
 
     createChild(name: string, onStateChanged: SyncStateChangedListener) {
-        const child = new SyncNode(name, onStateChanged, this);
+        const child = new SyncNode(this.adapter, name, onStateChanged, this);
         this.addChild(child);
         return child;
     }

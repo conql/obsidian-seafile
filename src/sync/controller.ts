@@ -5,9 +5,7 @@ import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedLis
 import * as utils from "../utils";
 import { debug } from "../utils";
 import { HEAD_COMMIT_PATH, PLUGIN_DIR } from "../config";
-import { Notice, Platform, Plugin } from "obsidian";
-
-const adapter = app.vault.adapter;
+import { DataAdapter, Notice, Platform, Plugin } from "obsidian";
 
 export type NodeChange = {
     node: SyncNode;
@@ -46,6 +44,7 @@ export class SyncController {
     private nodeRoot: SyncNode;
 
     public constructor(
+        private adapter: DataAdapter,
         private interval: number,
         private server: Server,
         private ignorePattern: string = "") {
@@ -60,10 +59,10 @@ export class SyncController {
 
     // Load SyncNodes from local storage
     async init() {
-        this.nodeRoot = await SyncNode.loadPath(n => this.nodeStateChanged(n));
+        this.nodeRoot = await SyncNode.loadPath(this.adapter, n => this.nodeStateChanged(n));
         if (this.localHead === undefined) {
-            if (await adapter.exists(HEAD_COMMIT_PATH)) {
-                this.localHead = await adapter.read(HEAD_COMMIT_PATH)
+            if (await this.adapter.exists(HEAD_COMMIT_PATH)) {
+                this.localHead = await this.adapter.read(HEAD_COMMIT_PATH)
             }
             else {
                 this.localHead = ""
@@ -75,7 +74,7 @@ export class SyncController {
         this.ignoreChange.add(path);
         try {
             mtime = mtime * 1000;
-            await adapter.write(path, "", { mtime });
+            await this.adapter.write(path, "", { mtime });
 
             if (fsId == ZeroFs) {
                 return;
@@ -83,14 +82,14 @@ export class SyncController {
 
             let nativePath = undefined;
             if (Platform.isMobile) {
-                nativePath = (adapter as any).getNativePath(path)
+                nativePath = (this.adapter as any).getNativePath(path)
             }
 
             const [, fs] = await this.server.getFs(fsId);
             for (let blockId of (fs as FileSeafFs).block_ids) {
                 const block = await this.server.getBlock(blockId);
                 if (Platform.isDesktop) {
-                    await adapter.append(path, new DataView(block) as unknown as string, { mtime })
+                    await this.adapter.append(path, new DataView(block) as unknown as string, { mtime })
                 }
                 else {
                     // Platform is mobile
@@ -103,7 +102,7 @@ export class SyncController {
             }
 
             if (Platform.isMobile) {
-                await adapter.append(path, "", { mtime }); // Set mtime
+                await this.adapter.append(path, "", { mtime }); // Set mtime
             }
         }
         finally {
@@ -131,7 +130,7 @@ export class SyncController {
         }
 
         // Step 1. Check file status: same, local, remote, merge, conflict
-        const local = await adapter.stat(path);
+        const local = await this.adapter.stat(path);
 
         let target = null;
         // Same:
@@ -197,9 +196,9 @@ export class SyncController {
                 else {
                     target = "remote";
                     if (local!.type == "file")
-                        await adapter.remove(path);
+                        await this.adapter.remove(path);
                     else
-                        await adapter.rmdir(path, true);
+                        await this.adapter.rmdir(path, true);
                 }
             }
         }
@@ -210,7 +209,7 @@ export class SyncController {
         let newRemote: Record<string, SeafDirent> = {};
 
         if ((target == "local" || target == "merge") && local && local.type == "folder") {
-            const fileList = await adapter.list(path);
+            const fileList = await this.adapter.list(path);
             const list = [...fileList.files, ...fileList.folders].map(abs => utils.Path.basename(abs));
             if (!newChildrenNames) newChildrenNames = new Set();
             for (let name of list) {
@@ -239,7 +238,7 @@ export class SyncController {
             }
 
             if (target == "remote" && !local) {
-                await adapter.mkdir(path);
+                await this.adapter.mkdir(path);
             }
 
             let promises = [];
@@ -262,14 +261,14 @@ export class SyncController {
                 if (Object.keys(nodeChildren).length === 0) {
                     // Merge result is an empty folder
                     if (!remote) {
-                        await adapter.rmdir(path, true);
+                        await this.adapter.rmdir(path, true);
                         await node.delete();
                         changes.push({ node, type: "remove-folder" });
                         return;
                     }
                     else {
                         // Local not exist
-                        await adapter.mkdir(path);
+                        await this.adapter.mkdir(path);
                         await node.setPrevAsync(remote, false);
                         node.state = { type: "sync" };
                         return;
@@ -287,10 +286,10 @@ export class SyncController {
             if (!remote) {
                 if (local) {
                     if (local.type == "file") {
-                        await adapter.remove(path);
+                        await this.adapter.remove(path);
                     }
                     else {
-                        await adapter.rmdir(path, true);
+                        await this.adapter.rmdir(path, true);
                     }
                 }
                 await node.delete();
@@ -357,7 +356,7 @@ export class SyncController {
     }
 
     async computeFileDirent(path: string, modifier: string): Promise<[FileSeafDirent, SeafFs | null, Record<string, ArrayBuffer>]> {
-        const stat = await adapter.stat(path);
+        const stat = await this.adapter.stat(path);
         if (!stat) throw new Error("Cannot compute fs of non-existent file");
 
         const blockBuffer: Record<string, ArrayBuffer> = {};
@@ -368,7 +367,7 @@ export class SyncController {
         }
         else {
             // to do: warn if file too large
-            const buffer = await adapter.readBinary(path);
+            const buffer = await this.adapter.readBinary(path);
             let blocks: Record<string, ArrayBuffer> = await utils.computeBlocks(buffer);
 
             let entries = Object.entries(blocks);
@@ -449,7 +448,7 @@ export class SyncController {
     }
 
     async computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {
-        let stat = await adapter.stat(localPath);
+        let stat = await this.adapter.stat(localPath);
         if (!stat) throw new Error(`File '${localPath}' does not exist.`);
         if (stat.type != "file") throw new Error(`Path '${localPath}' is not a file.`);
 
@@ -463,7 +462,7 @@ export class SyncController {
         }
 
         let blocks: Record<string, ArrayBuffer> = {};
-        let buffer = await adapter.readBinary(localPath);
+        let buffer = await this.adapter.readBinary(localPath);
         let blockSize = 8 * 1024 * 1024; // 8MB
         let numBlocks = Math.ceil(stat.size / blockSize);
         for (let i = 0; i < numBlocks; i++) {
@@ -538,7 +537,7 @@ export class SyncController {
         if (type == "modify") {
             const node = this.nodeRoot.find(path);
             if (node?.prev) {
-                const local = await adapter.stat(path);
+                const local = await this.adapter.stat(path);
                 if (local && Math.floor(local.mtime / 1000) === node.prev.mtime) return;
             }
         }
@@ -550,7 +549,7 @@ export class SyncController {
     private async setLocalHeadAsync(commitId: string) {
         if (this.localHead != commitId) {
             this.localHead = commitId;
-            await adapter.write(HEAD_COMMIT_PATH, this.localHead);
+            await this.adapter.write(HEAD_COMMIT_PATH, this.localHead);
         }
     }
 
