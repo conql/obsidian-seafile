@@ -1,7 +1,6 @@
-import { App, PluginSettingTab, Setting, TextComponent, arrayBufferToHex } from "obsidian";
+import { App, arrayBufferToHex, PluginSettingTab, Setting, TextComponent } from "obsidian";
 import SeafilePlugin from "./main";
 import Dialog from "./ui/dialog";
-import { debug } from "./utils";
 
 const manifestJson = require('../manifest.json') ?? { id: "seafile", version: "0.0.0" };
 
