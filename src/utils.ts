@@ -1,7 +1,7 @@
-import { Stat, arrayBufferToHex } from "obsidian";
+import { arrayBufferToHex } from "obsidian";
 import pThrottle from "p-throttle";
-import { Commit, DirSeafFs, FileSeafFs, MODE_FILE, SeafFs } from "./server";
 import { PlatformPath } from "path/posix";
+import { Commit, SeafFs } from "./server";
 
 export const Path = (require("path-browserify").posix) as PlatformPath;
 
@@ -39,6 +39,7 @@ export class FormData {
 
 }
 
+// Memoize function with a limit on the cache size
 type Func<T extends unknown[], V> = (...args: [...T]) => Promise<V>;
 export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLimit: number): Func<T, V> {
     let cache: Map<string, V | Promise<V>> = new Map(), cacheSize = 0;
@@ -83,6 +84,7 @@ export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLi
     }
 }
 
+// Pack multiple requests into a single request
 export function packRequest<FuncParamType, FuncRetType>
     (
         packFunc: (funcParamArray: Array<FuncParamType>) => Promise<Map<FuncParamType, FuncRetType>>,
@@ -161,7 +163,7 @@ export function sha1(data: ArrayBuffer | string) {
 }
 
 export function stringifySeafFs(fs: SeafFs): string {
-    // Stringify, add space after colons and commas
+    // Stringify, add one space after colons and commas
     let str = JSON.stringify(fs, null, "/");
     str = str.replace(/\//g, "").replace(/,\n/g, ", ").replace(/\n/g, "");
     return str;

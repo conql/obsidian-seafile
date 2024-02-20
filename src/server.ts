@@ -1,4 +1,4 @@
-import { RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise, requestUrl } from "obsidian";
+import { requestUrl, RequestUrlParam, RequestUrlResponse, RequestUrlResponsePromise } from "obsidian";
 import pRetry from "p-retry";
 import pThrottle from "p-throttle";
 import pTimeout from "p-timeout";

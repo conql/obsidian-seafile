@@ -1,12 +1,10 @@
 import { Notice, Plugin } from 'obsidian';
-import { SettingTab, Settings, loadSettings } from './settings';
-import Server from './server';
-import { SyncController } from './sync/controller';
-import { SyncNode } from './sync/node';
-import { debug, disableDebug } from './utils';
 import { DATA_DIR, HEAD_COMMIT_PATH, setApp } from './config';
+import Server from './server';
+import { loadSettings, Settings, SettingTab } from './settings';
+import { SyncController } from './sync/controller';
 import { ExplorerView } from './ui/explorer';
-import Dialog from './ui/dialog';
+import { debug, disableDebug } from './utils';
 
 export default class SeafilePlugin extends Plugin {
 	settings: Settings;
@@ -16,10 +14,12 @@ export default class SeafilePlugin extends Plugin {
 
 	async onload() {
 		setApp(this.app);
-		(window as any)['seafile'] = this;
 
 		this.settings = await loadSettings(this);
 		this.addSettingTab(new SettingTab(this.app, this));
+
+		if (this.settings.devMode)
+			(window as any)['seafile'] = this; // for debug
 
 		this.server = new Server(
 			this.settings.host,

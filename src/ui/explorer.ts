@@ -135,7 +135,6 @@ export class ExplorerView {
     }
 
     onPluginUnload() {
-        console.log("Unloading plugin");
         for (let [path, item] of Object.entries(this.fileItems)) {
             if (item.iconWrapper) {
                 item.iconWrapper.remove();

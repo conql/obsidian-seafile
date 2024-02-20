@@ -1,11 +1,10 @@
-import { assert } from "console";
 import * as IgnoreParser from 'gitignore-parser';
-import Server, { CommitChanges, DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
-import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedListener } from "./node";
+import { DataAdapter, Notice, Platform } from "obsidian";
+import { HEAD_COMMIT_PATH, PLUGIN_DIR } from "../config";
+import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
 import * as utils from "../utils";
 import { debug } from "../utils";
-import { HEAD_COMMIT_PATH, PLUGIN_DIR } from "../config";
-import { DataAdapter, Notice, Platform, Plugin } from "obsidian";
+import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedListener } from "./node";
 
 export type NodeChange = {
     node: SyncNode;
@@ -59,7 +58,7 @@ export class SyncController {
 
     // Load SyncNodes from local storage
     async init() {
-        this.nodeRoot = await SyncNode.loadPath(this.adapter, n => this.nodeStateChanged(n));
+        this.nodeRoot = await SyncNode.loadPath(this.adapter, n => this.raiseNodeStateChanged(n));
         if (this.localHead === undefined) {
             if (await this.adapter.exists(HEAD_COMMIT_PATH)) {
                 this.localHead = await this.adapter.read(HEAD_COMMIT_PATH)
@@ -92,11 +91,8 @@ export class SyncController {
                     await this.adapter.append(path, new DataView(block) as unknown as string, { mtime })
                 }
                 else {
-                    // Platform is mobile
-                    // Encode array buffer to base64 string
+                    // Hacky way to get the filesystem plugin to append to file when mobile
                     let encoded = await utils.arrayBufferToBase64(block);
-                    // Append to file
-                    // Hacky way to get the filesystem plugin
                     await (window.top as any).Capacitor.Plugins.Filesystem.appendFile({ path: nativePath, data: encoded });
                 }
             }
@@ -111,7 +107,7 @@ export class SyncController {
     }
 
     public onNodeStateChanged?: NodeStateChangedListener;
-    private nodeStateChanged(node: SyncNode) {
+    private raiseNodeStateChanged(node: SyncNode) {
         this.onNodeStateChanged?.(node);
     }
 
@@ -243,7 +239,7 @@ export class SyncController {
 
             let promises = [];
             for (let name of newChildrenNames) {
-                let nodeChild = nodeChildren[name] ?? node.createChild(name, n => this.nodeStateChanged(n));
+                let nodeChild = nodeChildren[name] ?? node.createChild(name, n => this.raiseNodeStateChanged(n));
                 let remoteChild = target == "local" ? nodeChild.prev : newRemote[name];
 
                 promises.push(
@@ -439,7 +435,7 @@ export class SyncController {
 
         let dirent: DirSeafDirent = {
             id: fsId,
-            mode: 16384,
+            mode: MODE_DIR,
             mtime,
             name,
         };
@@ -501,8 +497,6 @@ export class SyncController {
         }));
 
         // Create commit
-
-        // Create commit description
         const description = this.server.describeCommit({
             addedFiles: changes.filter(c => c.type == "add" && c.node.next!.mode == MODE_FILE).map(c => c.node.name),
             removedFiles: changes.filter(c => c.type == "remove-file").map(c => c.node.name),
@@ -511,7 +505,7 @@ export class SyncController {
             removedDirectories: changes.filter(c => c.type == "remove-folder").map(c => c.node.name),
             renamedFiles: [],
             renamedDirectories: []
-        })
+        });
         const commit = await this.server.createCommit(nodeRoot.next.id, description, parentCommitId);
         await this.server.uploadCommit(commit);
         await this.server.setHeadCommit(commit.commit_id);
