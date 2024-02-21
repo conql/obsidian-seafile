@@ -3,6 +3,7 @@
 ## Introduction
 
 This is an Obsidian plugin, designed to synchronize notes across devices using Seafile as the backend.
+![obsidian-seafile-demo](https://github.com/conql/obsidian-seafile/assets/49243542/5b8ac9aa-4180-4ca4-9abe-0b94134fd0c1)
 
 ### Features
 - Support for both desktop and mobile
