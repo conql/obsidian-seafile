@@ -62,7 +62,7 @@ export default class SeafilePlugin extends Plugin {
 			});
 
 			this.addRibbonIcon("dice", "Stop Sync", async () => {
-				await this.sync.stopSync();
+				await this.sync.stopSyncAsync();
 			});
 		}
 		else {
@@ -114,7 +114,7 @@ export default class SeafilePlugin extends Plugin {
 
 	onunload() {
 		if (this.sync)
-			this.sync.stopSync();
+			this.sync.stopSyncAsync();
 	}
 
 }

@@ -13,25 +13,20 @@ export type NodeChange = {
 
 export type SYNC_IDLE = {
     type: "idle";
-    message?: string;
 }
 
 export type SYNC_BUSY = {
     type: "busy";
-    message?: string;
+    toStop?: boolean;
+    message?: "download" | "upload" | "fetch";
 }
 
 export type SYNC_STOP = {
     type: "stop";
-    message?: string;
+    message?: "error" | "user";
 }
 
-export type SYNC_PENDING_STOP = {
-    type: "pendingStop";
-    message?: string;
-}
-
-export type SyncStatus = SYNC_IDLE | SYNC_BUSY | SYNC_STOP | SYNC_PENDING_STOP;
+export type SyncStatus = SYNC_IDLE | SYNC_BUSY | SYNC_STOP;
 
 export class SyncController {
     private account: string;
@@ -550,16 +545,16 @@ export class SyncController {
     }
 
     async sync() {
-        this.status = { type: "busy", message: "Fetching remote commit" }
+        this.status = { type: "busy", message: "fetch" }
         const changes: NodeChange[] = [];
         const remoteHead = await this.server.getHeadCommitId();
         const remoteRoot = await this.server.getCommitRoot(remoteHead);
 
-        this.status = { type: "busy", message: "Pulling changes" }
+        this.status.message = "download";
         await this.pull(changes, "", this.nodeRoot, remoteRoot);
         await this.setLocalHeadAsync(remoteHead);
 
-        this.status = { type: "busy", message: "Pushing changes" }
+        this.status.message = "upload";
         const newHead = await this.push(this.nodeRoot, changes, this.localHead);
         await this.setLocalHeadAsync(newHead);
 
@@ -571,7 +566,13 @@ export class SyncController {
     private _status: SyncStatus = { type: "stop" }
     public get status() { return this._status; }
     private set status(value) {
-        this._status = value
+        this._status = new Proxy<SyncStatus>(value, {
+            set: (target, prop, value) => {
+                Object.assign(target, { [prop]: value });
+                this.onSyncStatusChanged?.(target);
+                return true;
+            }
+        });
         this.onSyncStatusChanged?.(value);
     };
     public onSyncStatusChanged: ((status: SyncStatus) => void) | null = null;
@@ -582,8 +583,8 @@ export class SyncController {
             this.status = { type: "idle" };
             this.syncCycle();
         }
-        else if (this.status.type == "pendingStop") {
-            this.status = { type: "busy", message: this.status.message };
+        else if (this.status.type == "busy" && this.status.toStop) {
+            this.status.toStop = false;
         }
         else if (this.status.type == "idle") {
             debug.log("Sync started");
@@ -594,7 +595,7 @@ export class SyncController {
 
     async syncCycle() {
         if (this.status.type == "idle") {
-            this.status = { type: "busy", message: "Starting sync" };
+            this.status = { type: "busy" };
 
             debug.time("Sync")
             try {
@@ -602,33 +603,51 @@ export class SyncController {
             }
             catch (e) {
                 debug.error(e);
-                this.status = { type: "pendingStop", message: "Error" };
+                this.status = { type: "stop", message: "error" };
                 new Notice(`Sync failed: ${e.message}`);
             }
-            debug.timeEnd("Sync")
-
-            if (this.status.type != "pendingStop") {
-                this.status = { type: "idle" };
-                this.timeoutId = setTimeout(() => {
-                    this.syncCycle();
-                }, this.interval);
+            finally {
+                debug.timeEnd("Sync")
             }
-            else {
-                this.status = { type: "stop" };
-                debug.log("Sync stopped");
+
+            if (this.status.type === "busy") {
+                if (this.status.toStop) {
+                    this.status = { type: "stop" };
+                    debug.log("Sync stopped");
+                } else {
+                    this.status = { type: "idle" };
+                    this.timeoutId = setTimeout(() => {
+                        this.syncCycle();
+                    }, this.interval);
+                }
             }
         }
     }
 
-    stopSync() {
+    stopSyncAsync(): Promise<void> {
         if (this.status.type == "idle") {
             clearTimeout(this.timeoutId);
             this.status = { type: "stop" };
             debug.log("Sync stopped");
+            return Promise.resolve();
         }
         else if (this.status.type == "busy") {
-            this.status = { type: "pendingStop", message: this.status.message };
+            this.status.toStop = true;
             debug.log("Sync stopping");
+            return new Promise(resolve => {
+                const oldListener = this.onSyncStatusChanged;
+                this.onSyncStatusChanged = (status) => {
+                    if (status.type == "stop") {
+                        this.onSyncStatusChanged = oldListener;
+                        resolve();
+                    }
+
+                    oldListener?.(status);
+                }
+            });
+        }
+        else {
+            return Promise.resolve();
         }
     }
 }

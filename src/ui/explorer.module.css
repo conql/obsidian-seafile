@@ -41,11 +41,15 @@
 
 .sync-status {
     display: flex;
-    text-align: end;
+    flex-direction: row-reverse;
+    align-items: center;
+    margin: 0 8px 5px 0;
 }
 
-.sync-status-logo {
-    margin: 0 8px 0 20px;
+.sync-status-icon {
+    display: flex;
+    padding: 5px;
+    cursor: pointer;
 }
 
 .sync-status-text {

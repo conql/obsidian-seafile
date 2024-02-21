@@ -26,6 +26,7 @@ export class ExplorerView {
     private fileItems: Record<string, FileItem> = {};
     private statusContainter: HTMLElement;
     private statusText: HTMLElement;
+    private statusIcon: HTMLElement;
 
     private async registerFileExplorer() {
         // Find the file explorer
@@ -54,31 +55,36 @@ export class ExplorerView {
         this.statusContainter = document.createElement("div");
         this.statusContainter.classList.add(styles.syncStatus);
 
-        const statusLogo = document.createElement("div");
-        setIcon(statusLogo, icons.seafileLogo);
-        statusLogo.classList.add(styles.syncStatusLogo);
-        this.statusContainter.prepend(statusLogo);
+        this.statusIcon = document.createElement("div");
+        setIcon(this.statusIcon, "refresh-cw");
+        this.statusIcon.classList.add(styles.syncStatusIcon);
+        this.statusIcon.addEventListener("click", () => {
+            this.plugin.sync.startSync();
+        });
+        this.statusContainter.prepend(this.statusIcon);
 
         this.statusText = document.createElement("div");
         this.statusText.classList.add(styles.syncStatusText);
         this.statusContainter.appendChild(this.statusText);
-        this.statusText.innerText = "Init";
 
-        this.fileExplorer.containerEl.appendChild(this.statusContainter);
+        this.fileExplorer.containerEl.getElementsByClassName("nav-files-container")[0].after(this.statusContainter);
     }
 
     private statesBuffer: Map<string, SyncState> = new Map();
     private async nodeStateChanged(node: SyncNode) {
         const path = node.path === "" ? "/" : node.path.slice(1); // remove leading slash
-        // debug.log("Sync state update", path, node.state);
+
         const item = this.fileItems[path];
         if (item) {
             await this.renderFileItem(item, node.state);
-            // debug.log("Rendered state update", path, node.state);
         }
         else {
             this.statesBuffer.set(path, node.state);
-            // debug.log("Buffering state update", path, node.state);
+        }
+
+        // Update status if files modified
+        if (path === "/" && node.state.type === "init") {
+            setIcon(this.statusIcon, "refresh-cw");
         }
     }
 
@@ -102,7 +108,6 @@ export class ExplorerView {
 
         const wrapper = item.iconWrapper;
         if (state.type === "sync") {
-            // setIcon(wrapper, "check-circle-2");
             wrapper.textContent = "";
         }
         else if (state.type === "upload") {
@@ -113,8 +118,6 @@ export class ExplorerView {
         }
         else if (state.type === "download") {
             setIcon(wrapper, "download-cloud");
-            // let progress = parseInt(state.param as string);
-            // wrapper.appendText(` ${progress}%`);
         }
         else {
             wrapper.textContent = state.type;
@@ -124,13 +127,19 @@ export class ExplorerView {
 
     syncStatusChanged(status: SyncStatus): void {
         if (status.type == "idle") {
-            this.statusText.innerText = "Idle";
+            setIcon(this.statusIcon, "check");
         }
-        else if (status.type == "busy" || status.type == "pendingStop") {
-            this.statusText.innerText = "Syncing: " + status.message;
+        else if (status.type == "busy") {
+            if (status.message == "fetch" || status.message == "download")
+                setIcon(this.statusIcon, "download-cloud");
+            else if (status.message == "upload")
+                setIcon(this.statusIcon, "upload-cloud");
         }
-        else if(status.type == "stop"){
-            this.statusText.innerText = "Paused";
+        else if (status.type == "stop") {
+            if (status.message == "error")
+                setIcon(this.statusIcon, "alert-circle");
+            else
+                setIcon(this.statusIcon, "refresh-cw-off");
         }
     }
 
