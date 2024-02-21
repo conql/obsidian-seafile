@@ -163,16 +163,7 @@ export class SeafileSettingTab extends PluginSettingTab {
                 intervalText = text;
                 text.setPlaceholder("15")
                 text.setValue(Math.floor(settings.interval / 1000).toString())
-                text.onChange(async (value) => {
-                    const interval = parseInt(value) * 1000;
-                    if (isNaN(interval) || interval < 5) {
-                        new Notice("Sync interval must be at least 5 seconds");
-
-                        text.setValue(Math.floor(settings.interval / 1000).toString());
-                    }
-                })
-            }
-            )
+            })
             .addButton(button => button
                 .setButtonText('Save')
                 .onClick(async () => {

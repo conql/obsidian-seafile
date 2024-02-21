@@ -59,8 +59,15 @@ export class ExplorerView {
         this.statusIcon = document.createElement("div");
         setIcon(this.statusIcon, "refresh-cw");
         this.statusIcon.classList.add(styles.syncStatusIcon);
-        this.statusIcon.addEventListener("click", () => {
-            this.plugin.sync.startSync();
+        this.statusIcon.addEventListener("click", async () => {
+            if (!this.plugin.settings.enableSync) {
+                this.plugin.settings.enableSync = true;
+                await this.plugin.saveSettings();
+                this.plugin.enableSync();
+            }
+            else {
+                this.plugin.sync.startSync();
+            }
         });
         this.statusContainter.prepend(this.statusIcon);
 
