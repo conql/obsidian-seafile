@@ -1,59 +1,51 @@
 import { Notice, Plugin } from 'obsidian';
-import { HEAD_COMMIT_PATH, setApp, SYNC_DATA_PATH, SYNC_DLOG_PATH } from './config';
+import * as IgnoreParser from 'gitignore-parser';
+import { DEFAULT_IGNORE, initConfig, PLUGIN_DIR } from './config';
 import Server from './server';
-import { loadSettings, Settings, SettingTab } from './settings';
+import { DEFAULT_SETTINGS, SeafileSettings } from './settings';
 import { SyncController } from './sync/controller';
 import { ExplorerView } from './ui/explorer';
-import { debug, disableDebugConsole } from './utils';
+import { SeafileSettingTab } from './ui/setting_tab';
+import { disableDebugConsole } from './utils';
 
 export default class SeafilePlugin extends Plugin {
-	settings: Settings;
+	settings: SeafileSettings;
 	server: Server;
 	sync: SyncController;
 	explorerView: ExplorerView;
 
 	async onload() {
-		setApp(this.app);
+		this.settings = await this.loadSettings();
+		this.server = new Server(this.settings);
+		initConfig(this.app, this.server);
 
-		this.settings = await loadSettings(this);
-		this.addSettingTab(new SettingTab(this.app, this));
+		this.sync = new SyncController(this.app.vault.adapter, this.settings);
+		this.explorerView = new ExplorerView(this, this.sync);
+
+		this.registerEvent(this.app.vault.on("create", (file) => {
+			if (this.sync.status.type !== "stop")
+				this.sync.notifyChange("/" + file.path, "create");
+		}));
+		this.registerEvent(this.app.vault.on("delete", (file) => {
+			if (this.sync.status.type !== "stop")
+
+				this.sync.notifyChange("/" + file.path, "delete");
+		}));
+		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+			if (this.sync.status.type !== "stop") {
+				this.sync.notifyChange("/" + oldPath, "delete");
+				this.sync.notifyChange("/" + file.path, "create");
+			}
+		}));
+		this.registerEvent(this.app.vault.on("modify", (file) => {
+			if (this.sync.status.type !== "stop")
+				this.sync.notifyChange("/" + file.path, "modify");
+		}));
+
+		this.addSettingTab(new SeafileSettingTab(this.app, this));
 
 		if (this.settings.devMode) {
 			(window as any)['seafile'] = this; // for debug
-		}
-		else {
-			disableDebugConsole();
-		}
-
-		this.server = new Server(
-			this.settings.host,
-			this.settings.repoName,
-			this.settings.account,
-			this.settings.password,
-			this.settings.deviceName,
-			this.settings.deviceId
-		);
-
-		try {
-			await this.server.login();
-		}
-		catch (e) {
-			new Notice('[Seafile] Login failed: ' + e.message, 10000);
-			debug.error(e);
-			return;
-		}
-
-		await this.afterLogin();
-	}
-
-	private async afterLogin() {
-		this.sync = new SyncController(this.app.vault.adapter, this.settings.interval, this.server, this.settings.ignore);
-		this.explorerView = new ExplorerView(this, this.sync);
-		debug.time("Load SyncNodes");
-		await this.sync.init();
-		debug.timeEnd("Load SyncNodes");
-
-		if (this.settings.devMode) {
 			this.addRibbonIcon("dice", "Clear Vault", async () => {
 				await this.clearVault();
 			});
@@ -66,55 +58,109 @@ export default class SeafilePlugin extends Plugin {
 			});
 		}
 		else {
-			await this.sync.startSync();
+			disableDebugConsole();
+		}
+		if (this.settings.enableSync && !this.checkSyncReady()) {
+			this.settings.enableSync = false;
+			this.saveSettings();
+			new Notice("Set up the Seafile plugin before enabling sync.");
 		}
 
+		if (this.settings.enableSync) {
+			this.enableSync();
+		}
+	}
 
-		this.registerEvent(this.app.vault.on("create", (file) => {
-			this.sync.notifyChange("/" + file.path, "create");
-		}));
-		this.registerEvent(this.app.vault.on("delete", (file) => {
-			this.sync.notifyChange("/" + file.path, "delete");
-		}));
-		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-			this.sync.notifyChange("/" + oldPath, "delete");
-			this.sync.notifyChange("/" + file.path, "create");
-		}));
-		this.registerEvent(this.app.vault.on("modify", (file) => {
-			this.sync.notifyChange("/" + file.path, "modify");
-		}));
+	async disableSync() {
+		if (this.sync.status.type === "stop") return;
+		await this.sync.stopSyncAsync();
+	}
+
+	async enableSync() {
+		if (this.sync.status.type !== "stop") return;
+		await this.sync.init();
+		this.sync.startSync();
+	}
+
+	checkSyncReady(): boolean {
+		const settings = this.settings;
+		if (settings.authToken && settings.repoId) {
+			return true;
+		}
+		return false;
 	}
 
 	async clearVault() {
-		await (app as any).plugins.disablePlugin("seafile");
+		const clearNotice = new Notice("Clearing vault, please wait...", 0);
+		const waitForStopNotice = new Notice("Waiting for syncing to stop", 0);
 
-		const root = await this.app.vault.adapter.list("");
-		for (const file of root.files) {
-			await this.app.vault.adapter.remove(file);
+		try {
+			await this.sync.stopSyncAsync();
 		}
-		for (const folder of root.folders) {
-			if (folder === app.vault.configDir) {
-				continue;
+		finally {
+			waitForStopNotice.hide();
+		}
+
+		try {
+			const ignore = IgnoreParser.compile(DEFAULT_IGNORE + "\n" + this.settings.ignore);
+
+			const remove = async (path: string, isDir: boolean) => {
+				if (ignore.denies(path)) return;
+
+				if (!isDir) {
+					await this.app.vault.adapter.remove(path);
+					return;
+				}
+
+				let list = await this.app.vault.adapter.list(path);
+				for (const path of list.files) {
+					await remove(path, false);
+				}
+				for (const path of list.folders) {
+					await remove(path, true);
+				}
+
+				list = await this.app.vault.adapter.list(path);
+				if (list.files.length === 0 && list.folders.length === 0 && path !== "") {
+					await this.app.vault.adapter.rmdir(path, true);
+				}
 			}
-			else
-				await this.app.vault.adapter.rmdir(folder, true);
-		}
-		if (await this.app.vault.adapter.exists(SYNC_DATA_PATH)) {
-			await this.app.vault.adapter.remove(SYNC_DATA_PATH);
-		}
-		if(await this.app.vault.adapter.exists(SYNC_DLOG_PATH)){
-			await this.app.vault.adapter.remove(SYNC_DLOG_PATH);
-		}
-		if (await this.app.vault.adapter.exists(HEAD_COMMIT_PATH)) {
-			await this.app.vault.adapter.remove(HEAD_COMMIT_PATH);
-		}
 
-		await (this.app as any).plugins.enablePlugin("seafile");
+			await remove("", true);
+
+
+			// Clear own plugin folder
+			const list = await this.app.vault.adapter.list(PLUGIN_DIR);
+			for (const path of list.files) {
+				const basename = path.split("/").pop();
+				if (basename === "main.js" || basename === "manifest.json" || basename === "styles.css" || basename === "data.json") continue;
+				await this.app.vault.adapter.remove(path);
+			}
+			for (const path of list.folders) {
+				await this.app.vault.adapter.rmdir(path, true);
+			}
+
+			new Notice("Vault cleared", 3000);
+		}
+		finally {
+			clearNotice.hide();
+		}
 	}
 
 	onunload() {
 		if (this.sync)
 			this.sync.stopSyncAsync();
+	}
+
+
+	async loadSettings() {
+		const settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		return settings;
+	}
+
+	async saveSettings(settings: SeafileSettings = this.settings) {
+		this.settings = settings;
+		await this.saveData(settings);
 	}
 
 }

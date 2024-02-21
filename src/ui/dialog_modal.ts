@@ -1,41 +1,39 @@
-import { Modal, Setting } from "obsidian";
+import { ButtonComponent, Modal, Setting } from "obsidian";
 
 export default class Dialog extends Modal {
     constructor(app: any, private title: string, private message: string, private onConfirm?: () => any, private onCancel?: () => any) {
         super(app);
     }
 
-    private state: "yes" | "no" = "no";
     onOpen() {
         let { contentEl } = this;
         contentEl.empty();
-        contentEl.setText("Seafile");
-        contentEl.createEl("h2", { text: this.title });
-        contentEl.createEl("p", { text: this.message });
+        contentEl.setText(this.title);
+        const p = contentEl.createEl("p", { text: this.message });
+        p.style.whiteSpace = "pre-wrap";
 
+        let yesBtn: ButtonComponent, noBtn: ButtonComponent;
         new Setting(contentEl)
             .addButton(btn => {
+                yesBtn = btn;
                 btn.setButtonText("Yes");
-                btn.onClick(() => {
-                    this.state = "yes";
+                btn.onClick(async () => {
+                    yesBtn.setDisabled(true);
+                    noBtn.setDisabled(true);
+                    await this.onConfirm?.();
                     this.close();
                 });
             })
             .addButton(btn => {
+                noBtn = btn;
                 btn.setButtonText("No");
                 btn.onClick(() => {
-                    this.state = "no";
                     this.close();
                 });
             });
     }
 
     onClose(): void {
-        if (this.state === "yes" && this.onConfirm) {
-            this.onConfirm();
-        }
-        else if (this.onCancel) {
-            this.onCancel();
-        }
+        this.onCancel?.();
     }
 }

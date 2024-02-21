@@ -27,6 +27,7 @@ export class ExplorerView {
     private statusContainter: HTMLElement;
     private statusText: HTMLElement;
     private statusIcon: HTMLElement;
+    private isStatusSynced = false;
 
     private async registerFileExplorer() {
         // Find the file explorer
@@ -83,7 +84,7 @@ export class ExplorerView {
         }
 
         // Update status if files modified
-        if (path === "/" && node.state.type === "init") {
+        if (path === "/" && node.state.type === "init" && this.statusIcon && this.isStatusSynced) {
             setIcon(this.statusIcon, "refresh-cw");
         }
     }
@@ -126,8 +127,11 @@ export class ExplorerView {
     }
 
     syncStatusChanged(status: SyncStatus): void {
+        if (!this.statusIcon) return;
+
         if (status.type == "idle") {
             setIcon(this.statusIcon, "check");
+            this.isStatusSynced = true;
         }
         else if (status.type == "busy") {
             if (status.message == "fetch" || status.message == "download")

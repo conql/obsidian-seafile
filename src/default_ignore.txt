@@ -1,0 +1,8 @@
+CONFIG_DIR/plugins/seafile/main.js
+CONFIG_DIR/plugins/seafile/manifest.json
+CONFIG_DIR/plugins/seafile/styles.css
+CONFIG_DIR/plugins/seafile/.hotreload
+
+CONFIG_DIR/plugins/hot-reload
+
+CONFIG_DIR/*.json

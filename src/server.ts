@@ -2,6 +2,7 @@ import { requestUrl, RequestUrlParam, RequestUrlResponse, RequestUrlResponseProm
 import pRetry from "p-retry";
 import pThrottle from "p-throttle";
 import pTimeout from "p-timeout";
+import { SeafileSettings } from "./settings";
 import * as utils from "./utils";
 const pako = require('pako');
 const manifestJson = require('../manifest.json') ?? { id: "seafile", version: "0.0.0" };
@@ -79,24 +80,20 @@ export interface Commit {
 }
 export interface Repo {
     type: string;
-    id: string;
-    owner: string;
+    repo_id: string;
+    repo_name: string;
     owner_name: string;
+    owner_email: string;
     owner_contact_email: string;
-    name: string;
-    mtime: number;
+    last_modified: string;
+    modifier_name: string;
     modifier_email: string;
     modifier_contact_email: string;
-    modifier_name: string;
-    mtime_relative: string;
     size: number;
-    size_formatted: string;
     encrypted: boolean;
     permission: string;
-    virtual: boolean;
-    root: string;
-    head_commit_id: string;
-    version: number;
+    starred: boolean;
+    status: string;
     salt: string;
 }
 
@@ -124,35 +121,16 @@ export type CommitChanges = {
 };
 
 export default class Server {
-    private authToken: string;
-    private repoId: string;
-    private repoToken: string;
-
-    public constructor(
-        private host: string, private repoName: string,
-        private account: string, private password: string,
-        private deviceName: string, private deviceId: string) {
+    public constructor(private settings: SeafileSettings
+    ) {
     }
 
-    public getAccount() {
-        return this.account;
-    }
-
-    public async login(): Promise<void> {
-        await pTimeout((async () => {
-            this.authToken = await this.getAuthToken();
-            this.repoId = await this.getRepoId(this.repoName);
-            this.repoToken = await this.getRepoToken(this.repoId);
-        })(), { milliseconds: 10 * 1000 });
-    }
-
-
-    request(req: RequestUrlParam & RequestParam): RequestUrlResponsePromise {
+    private request(req: RequestUrlParam & RequestParam): RequestUrlResponsePromise {
         return pTimeout(requestUrl(req), { milliseconds: 120 * 1000 }) as unknown as RequestUrlResponsePromise;
     }
 
     private requestThrottled = pThrottle({ interval: 1000, limit: 15 })(this.request);
-    async sendRequest(param: RequestParam) {
+    private async sendRequest(param: RequestParam) {
         let req: RequestUrlParam & RequestParam = { ...param };
         req.throw = false;
         req.retry = req.retry || 1;
@@ -181,79 +159,84 @@ export default class Server {
 
     async requestSeafHttp(req: RequestParam) {
         if (!req.headers) req.headers = {};
-        req.headers["Seafile-Repo-Token"] = this.repoToken;
-        req.url = `${this.host}/seafhttp/${req.url}`
+        req.headers["Seafile-Repo-Token"] = this.settings.repoToken;
+        req.url = `${this.settings.host}/seafhttp/${req.url}`
 
         return this.sendRequest(req);
     }
 
     async requestAPIv20(req: RequestParam) {
         if (!req.headers) req.headers = {};
-        req.headers["Authorization"] = `Token ${this.authToken}`;
-        req.url = `${this.host}/api2/${req.url}`
+        req.headers["Authorization"] = `Token ${this.settings.authToken}`;
+        req.url = `${this.settings.host}/api2/${req.url}`
         return this.sendRequest(req);
     }
 
     async requestAPIv21(req: RequestParam) {
         if (!req.headers) req.headers = {};
-        req.headers["Authorization"] = `Token ${this.authToken}`;
-        req.url = `${this.host}/api/v2.1/${req.url}`
+        req.headers["Authorization"] = `Token ${this.settings.authToken}`;
+        req.url = `${this.settings.host}/api/v2.1/${req.url}`
         return this.sendRequest(req);
     }
 
-    async getAuthToken(): Promise<string> {
+    async getAuthToken(account: string, password: string, deviceName: string, deviceId: string): Promise<string> {
         let params = new URLSearchParams();
-        params.append("username", this.account);
-        params.append("password", this.password);
-        params.append("device_name", this.deviceName);
-        params.append("device_id", this.deviceId);
+        params.append("username", account);
+        params.append("password", password);
+        params.append("device_name", deviceName);
+        params.append("device_id", deviceId);
         params.append("client_version", "obsidian_plugin");
         params.append("platform", "windows");
 
-        let resp = await this.request({
-            url: `${this.host}/api2/auth-token/`,
+        let resp = await pTimeout(this.request({
+            url: `${this.settings.host}/api2/auth-token/`,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded'
             },
             body: params.toString(),
             throw: false
-        });
+        }), { milliseconds: 10 * 1000 });
 
         if (resp.status != 200) {
-            throw new Error(`Failed to get token: HTTP ${resp.status}`);
+            if (resp.status == 400) {
+                throw new Error("Failed to get auth token. Invalid username or password.");
+            }
+            else{
+                throw new Error(`Failed to get auth token. HTTP ${resp.status}`)
+            }
         }
 
         let data = await resp.json;
         return data.token;
     }
 
-    async getRepoId(name: string) {
-        let resp = await this.requestAPIv20({ url: `repos/` }) as Array<Repo>;
-        let repo = resp.find((repo) => repo.name == name);
-        if (!repo)
-            throw new Error("Repo not found");
-        return repo.id;
-    }
+    async getRepoList(): Promise<Repo[]> {
+        let resp = await this.sendRequest({
+            url: `${this.settings.host}/api/v2.1/repos/`,
+            headers: {
+                'Authorization': `Token ${this.settings.authToken}`
+            },
+            responseType: "json"
+        }) as { repos: Repo[] };
 
-    async getRepoInfo(repoId: string) {
-        let resp = await this.requestAPIv20({ url: `repos/${repoId}/download-info/` });
-        return resp;
+        return resp.repos;
     }
 
     async getRepoToken(repoId: string): Promise<string> {
-        return this.getRepoInfo(repoId).then(resp => resp.token);
+        let resp = await this.requestAPIv20({ url: `repos/${repoId}/download-info/`, responseType: "json" });
+        return resp.token;
     }
 
     async getDirInfo(path: string, recursive = false): Promise<DirInfo[]> {
         path = encodeURIComponent(path);
-        let resp = await this.requestAPIv20({ url: `repos/${this.repoId}/dir/?p=${path}&recursive=${recursive ? 1 : 0}` });
+        let resp = await this.requestAPIv20({ url: `repos/${this.settings.repoId}/dir/?p=${path}&recursive=${recursive ? 1 : 0}` });
         return resp;
     }
 
     async getFileDownloadLink(remotePath: string): Promise<string> {
         remotePath = encodeURIComponent(remotePath);
-        let downloadUrl = await this.requestAPIv20({ url: `repos/${this.repoId}/file/?p=${remotePath}` });
+        let downloadUrl = await this.requestAPIv20({ url: `repos/${this.settings.repoId}/file/?p=${remotePath}` });
         return downloadUrl;
     }
 
@@ -268,7 +251,7 @@ export default class Server {
         // newName = encodeURIComponent(newName);
         let resp = await this.requestAPIv20(
             {
-                url: `repos/${this.repoId}/file/?p=${oldPath}`,
+                url: `repos/${this.settings.repoId}/file/?p=${oldPath}`,
                 method: 'POST',
                 body: `operation=rename&newname=${newName}`,
                 contentType: 'application/x-www-form-urlencoded'
@@ -280,7 +263,7 @@ export default class Server {
         oldPath = encodeURIComponent(oldPath);
         newName = encodeURIComponent(newName);
         let resp = await this.requestAPIv20({
-            url: `repos/${this.repoId}/dir/?p=${oldPath}`,
+            url: `repos/${this.settings.repoId}/dir/?p=${oldPath}`,
             method: 'POST',
             body: `operation=rename&newname=${newName}`,
             contentType: 'application/x-www-form-urlencoded'
@@ -293,8 +276,8 @@ export default class Server {
             url: `repos/sync-batch-move-item/`,
             method: 'POST',
             body: JSON.stringify({
-                src_repo_id: this.repoId, src_parent_dir: srcParentDir, src_dirents: srcDirents,
-                dst_repo_id: this.repoId, dst_parent_dir: dstParentDir
+                src_repo_id: this.settings.repoId, src_parent_dir: srcParentDir, src_dirents: srcDirents,
+                dst_repo_id: this.settings.repoId, dst_parent_dir: dstParentDir
             }),
             contentType: 'application/json'
         });
@@ -332,7 +315,7 @@ export default class Server {
 
         let resp = await this.requestAPIv20(
             {
-                url: `repos/${this.repoId}/dir/?p=${path}`,
+                url: `repos/${this.settings.repoId}/dir/?p=${path}`,
                 method: 'POST',
                 body: `operation=mkdir`,
                 contentType: 'application/x-www-form-urlencoded'
@@ -349,7 +332,7 @@ export default class Server {
         let uploadLink: any = {};
         try {
             uploadLink = await this.requestAPIv20({
-                url: `repos/${this.repoId}/${mode}-link/?p=${baseDir}`,
+                url: `repos/${this.settings.repoId}/${mode}-link/?p=${baseDir}`,
                 method: "GET"
             });
 
@@ -379,7 +362,7 @@ export default class Server {
             url: uploadLink + "?ret-json=1",
             method: "POST",
             headers: {
-                Authorization: `Token ${this.authToken}`,
+                Authorization: `Token ${this.settings.authToken}`,
                 "Content-Type": formData.getContentType(),
             },
             body: await formData.getArrayBuffer(),
@@ -392,12 +375,12 @@ export default class Server {
     }
 
     async getHeadCommitId(): Promise<string> {
-        let resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/HEAD` });
+        let resp = await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/commit/HEAD` });
         return resp.head_commit_id;
     }
 
     getCommitInfo = utils.memoizeWithLimit(async (commit: string) => {
-        let resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/${commit}` });
+        let resp = await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/commit/${commit}` });
         return resp as Commit;
     }, 1000)
 
@@ -414,19 +397,19 @@ export default class Server {
     async createCommit(root_id: string, description: string, parent_id: string, ctime?: number): Promise<Commit> {
         if (!ctime) ctime = Math.floor(Date.now() / 1000);
 
-        const repoId = this.repoId;
+        const repoId = this.settings.repoId;
         const commit: Commit = {
             commit_id: "",
             root_id,
             repo_id: repoId,
-            creator_name: this.account,
-            creator: this.deviceId,
+            creator_name: this.settings.account,
+            creator: this.settings.deviceId,
             description,
             ctime,
             parent_id,
-            repo_name: this.repoName,
+            repo_name: this.settings.repoName,
             repo_desc: "",
-            device_name: this.deviceName,
+            device_name: this.settings.deviceName,
             client_version: `obsidian-seafile_${manifestJson.version}`,
             version: 1
         };
@@ -475,15 +458,15 @@ export default class Server {
     }
 
     async uploadCommit(commit: Commit) {
-        await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/${commit.commit_id}`, method: "PUT", body: JSON.stringify(commit), retry: 0, responseType: "text" });
+        await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/commit/${commit.commit_id}`, method: "PUT", body: JSON.stringify(commit), retry: 0, responseType: "text" });
     }
 
     async setHeadCommit(commit_id: string): Promise<void> {
-        await this.requestSeafHttp({ url: `repo/${this.repoId}/commit/HEAD/?head=${commit_id}`, method: "PUT", retry: 0, responseType: "text" });
+        await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/commit/HEAD/?head=${commit_id}`, method: "PUT", retry: 0, responseType: "text" });
     }
 
     async revertToCommit(commit_id: string): Promise<void> {
-        await this.requestAPIv21({ url: `repos/${this.repoId}/commits/${commit_id}/revert/`, method: "POST" });
+        await this.requestAPIv21({ url: `repos/${this.settings.repoId}/commits/${commit_id}/revert/`, method: "POST" });
     }
 
     async getPackFs(fsList: string[]): Promise<Map<string, SeafFsResult>> {
@@ -500,7 +483,7 @@ export default class Server {
         if (fsList.length == 0) return result;
 
         let data = await this.requestSeafHttp({
-            url: `repo/${this.repoId}/pack-fs/`,
+            url: `repo/${this.settings.repoId}/pack-fs/`,
             method: 'POST',
             body: JSON.stringify(fsList),
             responseType: "binary"
@@ -552,10 +535,10 @@ export default class Server {
         // Send fs data
         const resp = await pRetry(() =>
             this.request({
-                url: `${this.host}/seafhttp/repo/${this.repoId}/recv-fs/`,
+                url: `${this.settings.host}/seafhttp/repo/${this.settings.repoId}/recv-fs/`,
                 method: 'POST',
                 headers: {
-                    "Seafile-Repo-Token": this.repoToken,
+                    "Seafile-Repo-Token": this.settings.repoToken,
                 },
                 body: data.buffer,
                 throw: false
@@ -573,7 +556,7 @@ export default class Server {
     // check if the fs are in the server
     async checkFsList(fsList: string[]): Promise<Map<string, boolean>> {
         const result = new Map<string, boolean>(fsList.map((fsId: string) => [fsId, false]));
-        const resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/check-fs/`, method: "POST", body: JSON.stringify(fsList), retry: 0 });
+        const resp = await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/check-fs/`, method: "POST", body: JSON.stringify(fsList), retry: 0 });
         // resp is an array of not found fs
         resp.forEach((fsId: string) => result.set(fsId, true));
         return result;
@@ -584,7 +567,7 @@ export default class Server {
     async getBlock(blockId: string): Promise<ArrayBuffer> {
         let resp = await this.requestSeafHttp(
             {
-                url: `repo/${this.repoId}/block/${blockId}`,
+                url: `repo/${this.settings.repoId}/block/${blockId}`,
                 responseType: "binary",
                 retry: 0
             });
@@ -594,7 +577,7 @@ export default class Server {
     async sendBlock(id: string, data: ArrayBuffer): Promise<void> {
         let needUpload = await this.checkBlock(id);
         if (needUpload) {
-            let resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/block/${id}`, method: "PUT", body: data, retry: 0, responseType: "text" });
+            let resp = await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/block/${id}`, method: "PUT", body: data, retry: 0, responseType: "text" });
         }
     }
 
@@ -605,7 +588,7 @@ export default class Server {
         for (let block of blocksList)
             map.set(block, false);
 
-        let resp = await this.requestSeafHttp({ url: `repo/${this.repoId}/check-blocks/`, method: "POST", body: JSON.stringify(blocksList), retry: 0 });
+        let resp = await this.requestSeafHttp({ url: `repo/${this.settings.repoId}/check-blocks/`, method: "POST", body: JSON.stringify(blocksList), retry: 0 });
         // resp is an array of not found blocks
 
         for (let block of resp)
@@ -613,6 +596,4 @@ export default class Server {
         return map;
     }
     checkBlock = utils.packRequest<string, boolean>(this.checkBlocksList.bind(this), 1, 300, 1000);
-
-
-} 
+}

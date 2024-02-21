@@ -40,7 +40,8 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outdir: "dist",
 	loader: {
-		".svg": "text"
+		".svg": "text",
+		".txt": "text",
 	},
 	plugins: [
 		CssModulesPlugin({

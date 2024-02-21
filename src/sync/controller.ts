@@ -1,7 +1,8 @@
 import * as IgnoreParser from 'gitignore-parser';
 import { DataAdapter, Notice, Platform } from "obsidian";
-import { HEAD_COMMIT_PATH, PLUGIN_DIR } from "../config";
-import Server, { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
+import { SeafileSettings } from 'src/settings';
+import { DEFAULT_IGNORE, HEAD_COMMIT_PATH, PLUGIN_DIR, server } from "../config";
+import { DirSeafDirent, DirSeafFs, FileSeafDirent, FileSeafFs, MODE_DIR, MODE_FILE, SeafDirent, SeafFs, ZeroFs } from "../server";
 import * as utils from "../utils";
 import { debug } from "../utils";
 import { STATE_UPLOAD, SyncNode, SyncStateChangedListener as NodeStateChangedListener } from "./node";
@@ -29,7 +30,6 @@ export type SYNC_STOP = {
 export type SyncStatus = SYNC_IDLE | SYNC_BUSY | SYNC_STOP;
 
 export class SyncController {
-    private account: string;
     private ignore: {
         accepts(input: string): boolean;
         denies(input: string): boolean;
@@ -39,16 +39,13 @@ export class SyncController {
 
     public constructor(
         private adapter: DataAdapter,
-        private interval: number,
-        private server: Server,
-        private ignorePattern: string = "") {
+        private settings: SeafileSettings) {
 
-        this.account = server.getAccount();
-        const selfIgnorePath = PLUGIN_DIR;
-        this.ignore = IgnoreParser.compile(ignorePattern);
-        if (this.ignore.accepts(selfIgnorePath)) {
-            this.ignore = IgnoreParser.compile(this.ignorePattern + '\n' + selfIgnorePath);
-        }
+        this.setIgnorePattern(settings.ignore);
+    }
+
+    public setIgnorePattern(pattern: string) {
+        this.ignore = IgnoreParser.compile(DEFAULT_IGNORE + '\n' + pattern);
     }
 
     // Load sync data
@@ -81,9 +78,9 @@ export class SyncController {
                 nativePath = (this.adapter as any).getNativePath(path)
             }
 
-            const [, fs] = await this.server.getFs(fsId);
+            const [, fs] = await server.getFs(fsId);
             for (let blockId of (fs as FileSeafFs).block_ids) {
-                const block = await this.server.getBlock(blockId);
+                const block = await server.getBlock(blockId);
                 if (Platform.isDesktop) {
                     await this.adapter.append(path, new DataView(block) as unknown as string, { mtime })
                 }
@@ -210,7 +207,7 @@ export class SyncController {
             }
         }
         if ((target == "remote" || target == "merge") && remote && remote.mode == MODE_DIR) {
-            let [, fs] = await this.server.getFs(remote.id);
+            let [, fs] = await server.getFs(remote.id);
             fs = fs as DirSeafFs;
             if (!newChildrenNames) newChildrenNames = new Set();
             if (fs) {
@@ -315,7 +312,7 @@ export class SyncController {
                 return;
             }
             else if (local.type === "file") {
-                const [dirent, fs, blocks] = await this.computeFileDirent(path, this.account);
+                const [dirent, fs, blocks] = await this.computeFileDirent(path, this.settings.account);
                 node.setNext(dirent, false);
                 node.state = { type: "upload", param: { progress: 0, fs, blocks } };
                 changes.push({ node, type: remote ? "modify" : "add" });
@@ -343,7 +340,7 @@ export class SyncController {
             node.state = { type: "upload", param: { progress: 0, fs } };
             changes.push({ node, type: remote ? "modify" : "add" });
             debug.log(`Upload "${path}"`);
-            debug.log([dirent.id, fs], remote ? await this.server.getFs(remote.id) : null);
+            debug.log([dirent.id, fs], remote ? await server.getFs(remote.id) : null);
             return;
         }
     }
@@ -485,16 +482,16 @@ export class SyncController {
             const param = (node.state as STATE_UPLOAD).param;
             if (param.blocks) {
                 await Promise.all(Object.entries(param.blocks).map(async ([blockId, block]) => {
-                    if (await this.server.checkBlock(blockId))
-                        await this.server.sendBlock(blockId, block);
+                    if (await server.checkBlock(blockId))
+                        await server.sendBlock(blockId, block);
                 }));
             }
-            if (param.fs && await this.server.checkFs(node.next.id))
-                await this.server.sendFs([node.next.id, param.fs])
+            if (param.fs && await server.checkFs(node.next.id))
+                await server.sendFs([node.next.id, param.fs])
         }));
 
         // Create commit
-        const description = this.server.describeCommit({
+        const description = server.describeCommit({
             addedFiles: changes.filter(c => c.type == "add" && c.node.next!.mode == MODE_FILE).map(c => c.node.name),
             removedFiles: changes.filter(c => c.type == "remove-file").map(c => c.node.name),
             modifiedFiles: changes.filter(c => c.type == "modify" && c.node.next!.mode == MODE_FILE).map(c => c.node.name),
@@ -503,9 +500,9 @@ export class SyncController {
             renamedFiles: [],
             renamedDirectories: []
         });
-        const commit = await this.server.createCommit(nodeRoot.next.id, description, parentCommitId);
-        await this.server.uploadCommit(commit);
-        await this.server.setHeadCommit(commit.commit_id);
+        const commit = await server.createCommit(nodeRoot.next.id, description, parentCommitId);
+        await server.uploadCommit(commit);
+        await server.setHeadCommit(commit.commit_id);
 
         // Update nodes
         for (let node of uploads) {
@@ -547,8 +544,8 @@ export class SyncController {
     async sync() {
         this.status = { type: "busy", message: "fetch" }
         const changes: NodeChange[] = [];
-        const remoteHead = await this.server.getHeadCommitId();
-        const remoteRoot = await this.server.getCommitRoot(remoteHead);
+        const remoteHead = await server.getHeadCommitId();
+        const remoteRoot = await server.getCommitRoot(remoteHead);
 
         this.status.message = "download";
         await this.pull(changes, "", this.nodeRoot, remoteRoot);
@@ -618,7 +615,7 @@ export class SyncController {
                     this.status = { type: "idle" };
                     this.timeoutId = setTimeout(() => {
                         this.syncCycle();
-                    }, this.interval);
+                    }, this.settings.interval);
                 }
             }
         }
