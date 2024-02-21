@@ -18,21 +18,31 @@ export class SeafileSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
+        let hostText: TextComponent;
         new Setting(containerEl)
             .setName('Host')
             .setDesc('Server URL')
             .addText(text => {
+                hostText = text;
                 text.setPlaceholder("https://example.com");
                 text.setValue(settings.host);
-                text.onChange(async (value) => {
-                    if (value.endsWith('/')) {
-                        value = value.slice(0, -1);
-                        text.setValue(value);
+            })
+            .addButton(button => button
+                .setButtonText('Save')
+                .onClick(async () => {
+                    try {
+                        const url = new URL(hostText.getValue());
+                        if (url.protocol != "http:" && url.protocol != "https:") throw new Error("Invalid protocol");
+                        settings.host = url.origin;
+                        await this.plugin.saveSettings();
+                        new Notice("Host saved");
                     }
-                    settings.host = value;
-                    await this.plugin.saveSettings();
-                });
-            });
+                    catch (error) {
+                        new Notice(error.message);
+                    }
+                    hostText.setValue(settings.host);
+                })
+            );
         let accountButton: ButtonComponent;
         const accountSetting = new Setting(containerEl)
             .setName('Account')
@@ -104,7 +114,7 @@ export class SeafileSettingTab extends PluginSettingTab {
                         repoSetting.setDesc(repoName);
                         await this.plugin.saveSettings();
 
-                        if(settings.enableSync) this.plugin.sync.startSync();
+                        if (settings.enableSync) this.plugin.sync.startSync();
                     }).open();
                 });
             });
