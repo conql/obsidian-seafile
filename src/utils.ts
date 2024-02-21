@@ -1,7 +1,8 @@
-import { arrayBufferToHex } from "obsidian";
+import { arrayBufferToHex, Stat, TFile } from "obsidian";
 import pThrottle from "p-throttle";
 import { PlatformPath } from "path/posix";
 import { Commit, SeafFs } from "./server";
+import * as config from "./config";
 
 export const Path = (require("path-browserify").posix) as PlatformPath;
 
@@ -250,8 +251,38 @@ for (let key in console) {
     }
 }
 
-export function disableDebug() {
+export function disableDebugConsole() {
     for (let key in debug) {
         (debug as any)[key] = () => { };
+    }
+}
+
+export function isHiddenPath(path: string) {
+    const parts = path.split("/");
+    for (let part of parts) {
+        if (part.startsWith(".")) return true;
+    }
+    return false;
+}
+
+export async function fastStat(path: string): Promise<Stat | null> {
+    while (path.startsWith("/")) path = path.slice(1);
+    while (path.endsWith("/")) path = path.slice(0, -1);
+    if (path === "") path = "/";
+
+    const absFile = config.app.vault.getAbstractFileByPath(path);
+    if (absFile) {
+        if (absFile instanceof TFile) {
+            return { ...absFile.stat, type: "file" };
+        }
+        else {
+            return { size: 0, ctime: 0, mtime: 0, type: "folder" };
+        }
+    }
+    else if (isHiddenPath(path)) {
+        return await config.app.vault.adapter.stat(path);
+    }
+    else {
+        return null;
     }
 }

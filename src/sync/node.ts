@@ -1,6 +1,6 @@
 import { DataAdapter } from "obsidian";
-import { DATA_DIR } from "../config";
-import { FileSeafDirent, MODE_FILE, SeafDirent, SeafFs } from "../server";
+import { SYNC_DLOG_PATH, adapter, SYNC_DATA_PATH } from "../config";
+import { MODE_FILE, SeafDirent, SeafFs } from "../server";
 import * as utils from "../utils";
 import { debug } from "../utils";
 
@@ -30,7 +30,19 @@ export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC 
 
 export type SyncStateChangedListener = (node: SyncNode) => void;
 
+export type SerializedSyncNode = {
+    prev: SeafDirent | null,
+    children: Record<string, SerializedSyncNode>
+}
+
+export type SerializedLogData = [string, SeafDirent | null];
+
 export class SyncNode {
+    public static onStateChanged: SyncStateChangedListener | undefined;
+    private static _dataLogCount = 0;
+    public static get dataLogCount() { return this._dataLogCount; }
+    private static set dataLogCount(value: number) { this._dataLogCount = value; }
+
     public readonly path: string;
     private children: Record<string, SyncNode> = {};
     private _prev?: SeafDirent;
@@ -39,9 +51,7 @@ export class SyncNode {
     public nextDirty = true; // next means the pending upload state
 
     private constructor(
-        private adapter: DataAdapter,
         public readonly name: string,
-        public onStateChanged: SyncStateChangedListener,
         public readonly parent?: SyncNode,
     ) {
         this.path = this.parent ? this.parent.path + "/" + this.name : this.name;
@@ -56,89 +66,121 @@ export class SyncNode {
         this._state = new Proxy(value, {
             set: (target, prop, value) => {
                 Object.assign(target, { [prop]: value });
-                this.onStateChanged?.(this);
+                SyncNode.onStateChanged?.(this);
                 return true;
             }
         });
-        this.onStateChanged?.(this);
+        SyncNode.onStateChanged?.(this);
     }
 
-    public static async loadPath(adapter: DataAdapter, onStateChanged: SyncStateChangedListener, realPath: string = DATA_DIR, parent?: SyncNode): Promise<SyncNode> {
-        let metadata: SeafDirent;
-        try {
-            metadata = JSON.parse(await adapter.read(realPath + "/metadata.json"));
-            const node = new SyncNode(adapter, metadata.name, onStateChanged, parent); // Use dirent name instead of path name
-            node.prev = metadata;
-            node.prevDirty = true;
+    public static serialize(node: SyncNode): SerializedSyncNode {
+        const children: Record<string, SerializedSyncNode> = {};
+        for (const [name, child] of Object.entries(node.children)) {
+            if (child.prev)
+                children[name] = SyncNode.serialize(child);
+        }
+        return {
+            prev: node.prev!,
+            children: children
+        }
+    }
 
-            const children = await adapter.list(realPath);
+    public static async deserialize(name: string, data: SerializedSyncNode, parent?: SyncNode): Promise<SyncNode> {
+        const node = new SyncNode(name, parent);
+        node.prev = data.prev ?? undefined;
+        parent?.addChild(node);
+
+        if (!node.prev) {
+            debug.log(`Path '${node.path}' has no prev.`);
+            const stat = await utils.fastStat(node.path);
+            if (!stat) {
+                node.prev = undefined;
+                node.prevDirty = false;
+                node.state = { "type": "delete" }
+            }
+        }
+        else if (node.prev.mode === MODE_FILE) {
+            const stat = await utils.fastStat(node.path);
+            if (stat && Math.floor(stat.mtime / 1000) == node.prev.mtime && stat.size == node.prev.size) {
+                node.prevDirty = false;
+                node.state = { "type": "sync" }
+            }
+        }
+        else {
             let childrenDirty = false;
-
-            for (let childPath of children.folders) {
-                const child = await SyncNode.loadPath(adapter, onStateChanged, childPath, node);
-                node.addChild(child);
+            for (const [name, childData] of Object.entries(data.children)) {
+                const child = await SyncNode.deserialize(name, childData, node);
                 if (child.prevDirty) childrenDirty = true;
             }
-
-            for (let childPath of children.files) {
-                const childName = utils.Path.basename(childPath);
-                if (childName === "metadata.json") continue;
-                const childPrev: FileSeafDirent = JSON.parse(await adapter.read(realPath + "/" + childName));
-                const stat = await adapter.stat(childPath);
-                const child = new SyncNode(adapter, childPrev.name, onStateChanged, node);
-                child.prev = childPrev;
-                child.prevDirty =
-                    (
-                        stat != null &&
-                        Math.floor(stat.mtime / 1000) === childPrev.mtime &&
-                        stat.size === childPrev.size
-                    )
-                if (child.prevDirty)
-                    childrenDirty = true;
-                else {
-                    child.state = { "type": "sync" }
-                }
-                node.addChild(child);
-            }
-
             if (!childrenDirty) {
                 node.prevDirty = false;
                 node.state = { "type": "sync" }
             }
-            return node;
         }
-        catch (e) {
-            const path = realPath.replace(DATA_DIR, "");
-            debug.warn(`Cannot load metadata for "${path}", parent: ${parent?.name}`, e);
-            return new SyncNode(adapter, path.split("/").pop() || "", onStateChanged, parent);
-        }
+
+        return node
     }
 
-    private async saveDirent(dirent: SeafDirent | undefined) {
-        const escapedPath = this.path.replace(/metadata.json$/, "#metadata.json");
-        const savePath = DATA_DIR + escapedPath;
+    public static async load(): Promise<SyncNode> {
+        let fullData = { prev: null, children: {} } as SerializedSyncNode;
+        try {
+            fullData = JSON.parse(await adapter.read(SYNC_DATA_PATH)) as SerializedSyncNode;
+        } catch { }
 
-        if (!dirent) {
-            // Delete
-            const stat = await this.adapter.stat(savePath);
-            if (stat?.type == "file") {
-                await this.adapter.remove(savePath);
+        let logData = [] as string[];
+        try {
+            logData = (await adapter.read(SYNC_DLOG_PATH)).split("\n");
+        } catch { }
+
+        for (const line of logData) {
+            if (!line.trim()) continue;
+            try {
+                let [path, dirent] = JSON.parse(line) as SerializedLogData;
+                while (path.startsWith("/")) path = path.slice(1);
+                const parts = path.split("/");
+                const name = parts.pop()!;
+                let base = fullData;
+                for (const part of parts) {
+                    if (!base.children.hasOwnProperty(part)) {
+                        base.children[part] = { prev: null, children: {} };
+                    }
+                    base = base.children[part];
+                }
+                if (dirent) {
+                    if (name === "")
+                        base.prev = dirent;
+                    else if (!base.children.hasOwnProperty(name))
+                        base.children[name] = { prev: dirent, children: {} }
+                    else
+                        base.children[name].prev = dirent;
+                }
+                else {
+                    if (name === "")
+                        base.prev = null;
+                    else if (base.children.hasOwnProperty(name))
+                        delete base.children[name];
+                }
             }
-            else if (stat?.type == "folder") {
-                await this.adapter.rmdir(savePath, true);
+            catch (e) {
+                debug.error(`Failed to parse log data: ${line}`, e);
+                break;
             }
         }
-        else {
-            if (dirent.mode == MODE_FILE) {
-                const baseFolder = savePath.slice(0, savePath.lastIndexOf("/"));
-                if (!await this.adapter.exists(baseFolder)) await this.adapter.mkdir(baseFolder);
-                await this.adapter.write(savePath, JSON.stringify(dirent));
-            }
-            else {
-                if (!await this.adapter.exists(savePath)) await this.adapter.mkdir(savePath);
-                await this.adapter.write(savePath + "/metadata.json", JSON.stringify(dirent));
-            }
-        }
+
+        return await this.deserialize("", fullData);
+    }
+
+    public static async save(root: SyncNode) {
+        const data = this.serialize(root);
+        await adapter.write(SYNC_DATA_PATH, JSON.stringify(data));
+        await adapter.write(SYNC_DLOG_PATH, "");
+        SyncNode.dataLogCount = 0;
+    }
+
+    private async appendDataLog(dirent: SeafDirent | undefined | null) {
+        if (!dirent) dirent = null;
+        await adapter.append(SYNC_DLOG_PATH, JSON.stringify([this.path, dirent] as SerializedLogData) + "\n")
+        SyncNode.dataLogCount++;
     }
 
     exec(path: string, callback: (node: SyncNode) => boolean, order: "pre" | "post" = "pre", throwError = true): boolean {
@@ -209,11 +251,13 @@ export class SyncNode {
         this.children[node.name] = node;
     }
 
-    createChild(name: string, onStateChanged: SyncStateChangedListener) {
-        const child = new SyncNode(this.adapter, name, onStateChanged, this);
+    createChild(name: string): SyncNode {
+        const child = new SyncNode(name, this);
         this.addChild(child);
         return child;
     }
+
+
 
     removeChild(node: SyncNode) {
         if (this.children.hasOwnProperty(node.name)) {
@@ -241,9 +285,11 @@ export class SyncNode {
     }
 
     async setPrevAsync(prev?: SeafDirent, dirty = true) {
+        if (!(prev?.id === this.prev?.id && prev?.mtime === this.prev?.mtime)) {
+            await this.appendDataLog(prev);
+            this.prev = prev;
+        }
         this.prevDirty = dirty;
-        this.prev = prev;
-        await this.saveDirent(this.prev);
     }
 
     async applyNext() {

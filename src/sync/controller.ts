@@ -56,9 +56,11 @@ export class SyncController {
         }
     }
 
-    // Load SyncNodes from local storage
+    // Load sync data
     async init() {
-        this.nodeRoot = await SyncNode.loadPath(this.adapter, n => this.raiseNodeStateChanged(n));
+        SyncNode.onStateChanged = n => this.raiseNodeStateChanged(n);
+        this.nodeRoot = await SyncNode.load();
+
         if (this.localHead === undefined) {
             if (await this.adapter.exists(HEAD_COMMIT_PATH)) {
                 this.localHead = await this.adapter.read(HEAD_COMMIT_PATH)
@@ -126,7 +128,7 @@ export class SyncController {
         }
 
         // Step 1. Check file status: same, local, remote, merge, conflict
-        const local = await this.adapter.stat(path);
+        const local = await utils.fastStat(path);
 
         let target = null;
         // Same:
@@ -239,7 +241,7 @@ export class SyncController {
 
             let promises = [];
             for (let name of newChildrenNames) {
-                let nodeChild = nodeChildren[name] ?? node.createChild(name, n => this.raiseNodeStateChanged(n));
+                let nodeChild = nodeChildren[name] ?? node.createChild(name);
                 let remoteChild = target == "local" ? nodeChild.prev : newRemote[name];
 
                 promises.push(
@@ -352,7 +354,7 @@ export class SyncController {
     }
 
     async computeFileDirent(path: string, modifier: string): Promise<[FileSeafDirent, SeafFs | null, Record<string, ArrayBuffer>]> {
-        const stat = await this.adapter.stat(path);
+        const stat = await utils.fastStat(path);
         if (!stat) throw new Error("Cannot compute fs of non-existent file");
 
         const blockBuffer: Record<string, ArrayBuffer> = {};
@@ -444,7 +446,7 @@ export class SyncController {
     }
 
     async computeBlocks(localPath: string): Promise<Record<string, ArrayBuffer>> {
-        let stat = await this.adapter.stat(localPath);
+        let stat = await utils.fastStat(localPath);
         if (!stat) throw new Error(`File '${localPath}' does not exist.`);
         if (stat.type != "file") throw new Error(`Path '${localPath}' is not a file.`);
 
@@ -531,7 +533,7 @@ export class SyncController {
         if (type == "modify") {
             const node = this.nodeRoot.find(path);
             if (node?.prev) {
-                const local = await this.adapter.stat(path);
+                const local = await utils.fastStat(path);
                 if (local && Math.floor(local.mtime / 1000) === node.prev.mtime) return;
             }
         }
@@ -560,6 +562,9 @@ export class SyncController {
         this.status = { type: "busy", message: "Pushing changes" }
         const newHead = await this.push(this.nodeRoot, changes, this.localHead);
         await this.setLocalHeadAsync(newHead);
+
+        if (SyncNode.dataLogCount > 100)
+            await SyncNode.save(this.nodeRoot);
     }
 
     private timeoutId: any;

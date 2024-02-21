@@ -1,10 +1,10 @@
 import { Notice, Plugin } from 'obsidian';
-import { DATA_DIR, HEAD_COMMIT_PATH, setApp } from './config';
+import { HEAD_COMMIT_PATH, setApp, SYNC_DATA_PATH, SYNC_DLOG_PATH } from './config';
 import Server from './server';
 import { loadSettings, Settings, SettingTab } from './settings';
 import { SyncController } from './sync/controller';
 import { ExplorerView } from './ui/explorer';
-import { debug, disableDebug } from './utils';
+import { debug, disableDebugConsole } from './utils';
 
 export default class SeafilePlugin extends Plugin {
 	settings: Settings;
@@ -18,8 +18,12 @@ export default class SeafilePlugin extends Plugin {
 		this.settings = await loadSettings(this);
 		this.addSettingTab(new SettingTab(this.app, this));
 
-		if (this.settings.devMode)
+		if (this.settings.devMode) {
 			(window as any)['seafile'] = this; // for debug
+		}
+		else {
+			disableDebugConsole();
+		}
 
 		this.server = new Server(
 			this.settings.host,
@@ -62,7 +66,6 @@ export default class SeafilePlugin extends Plugin {
 			});
 		}
 		else {
-			disableDebug();
 			await this.sync.startSync();
 		}
 
@@ -96,8 +99,11 @@ export default class SeafilePlugin extends Plugin {
 			else
 				await this.app.vault.adapter.rmdir(folder, true);
 		}
-		if (await this.app.vault.adapter.exists(DATA_DIR)) {
-			await this.app.vault.adapter.rmdir(DATA_DIR, true);
+		if (await this.app.vault.adapter.exists(SYNC_DATA_PATH)) {
+			await this.app.vault.adapter.remove(SYNC_DATA_PATH);
+		}
+		if(await this.app.vault.adapter.exists(SYNC_DLOG_PATH)){
+			await this.app.vault.adapter.remove(SYNC_DLOG_PATH);
 		}
 		if (await this.app.vault.adapter.exists(HEAD_COMMIT_PATH)) {
 			await this.app.vault.adapter.remove(HEAD_COMMIT_PATH);
