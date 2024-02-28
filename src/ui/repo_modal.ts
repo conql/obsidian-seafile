@@ -1,51 +1,53 @@
-import { Modal, Notice, Setting } from "obsidian";
+import { App, Modal, Notice, Setting } from "obsidian";
 import { server } from "src/config";
 import { Repo } from "src/server";
 import { debug } from "src/utils";
+import prettyBytes from "pretty-bytes";
 
 export default class RepoModal extends Modal {
 
-    constructor(app: any, private callback: (repoName: string, repoId: string, repoToken: string) => void) {
-        super(app);
-    }
+	constructor(app: App, private callback: (repoName: string, repoId: string, repoToken: string) => void) {
+		super(app);
+	}
 
-    async loadRepoToken(repo: Repo) {
-        try {
-            const repoToken = await server.getRepoToken(repo.repo_id);
-            this.callback(repo.repo_name, repo.repo_id, repoToken);
-        }
-        catch (error) {
-            new Notice("Failed to load repository token. " + error.message);
-            debug.error(error);
-        }
-    }
+	async loadRepoToken(repo: Repo) {
+		try {
+			const repoToken = await server.getRepoToken(repo.repo_id);
+			this.callback(repo.repo_name, repo.repo_id, repoToken);
+		}
+		catch (error) {
+			new Notice("Failed to load repository token. " + error.message);
+			debug.error(error);
+		}
+	}
 
-    async loadRepos(contentEl: HTMLElement) {
-        const repoList = await server.getRepoList();
+	async loadRepos(contentEl: HTMLElement) {
+		const repoList = await server.getRepoList();
 
-        for (const repo of repoList) {
-            new Setting(contentEl)
-                .setName(repo.repo_name)
-                .addButton(button => button.onClick(async () => {
-                    button.setDisabled(true);
-                    await this.loadRepoToken(repo);
-                    this.close()
-                }).setButtonText("Select"))
-        }
+		for (const repo of repoList) {
+			new Setting(contentEl)
+				.setName(repo.repo_name)
+				.setDesc(`Size: ${prettyBytes(repo.size)}. Last modified: ${new Date(repo.last_modified).toLocaleString()}.`)
+				.addButton(button => button.onClick(async () => {
+					button.setDisabled(true);
+					await this.loadRepoToken(repo);
+					this.close();
+				}).setButtonText("Select"));
+		}
 
-        if (repoList.length == 0) {
-            contentEl.createEl("p", { text: "No repositories found." });
-        }
-    }
+		if (repoList.length == 0) {
+			contentEl.createEl("p", { text: "No repositories found." });
+		}
+	}
 
-    onOpen() {
-        const { contentEl } = this;
-        contentEl.setText("Choose a repository to sync")
+	onOpen() {
+		const { contentEl } = this;
+		this.titleEl.textContent = "Choose a repository to sync";
 
-        const loading = contentEl.createEl("p", { text: "Loading repositories..." });
-        this.loadRepos(contentEl).then(() => loading.remove()).catch(error => {
-            loading.textContent = "Failed to load repositories. " + error.message;
-            debug.error(error);
-        })
-    }
+		const loading = contentEl.createEl("p", { text: "Loading repositories..." });
+		this.loadRepos(contentEl).then(() => loading.remove()).catch(error => {
+			loading.textContent = "Failed to load repositories. " + error.message;
+			debug.error(error);
+		});
+	}
 }

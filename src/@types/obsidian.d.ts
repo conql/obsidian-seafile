@@ -1,4 +1,4 @@
-import { TAbstractFile, TFile, View, WorkspaceLeaf } from 'obsidian';
+import { DataAdapter, TAbstractFile, TFile, View, WorkspaceLeaf } from "obsidian";
 
 interface InternalPlugin {
   enabled: boolean;
@@ -7,7 +7,7 @@ interface InternalPlugin {
 }
 
 interface StarredFile {
-  type: 'file';
+  type: "file";
   title: string;
   path: string;
 }
@@ -24,19 +24,19 @@ type FileExplorerInternalPlugin = InternalPlugin
 
 interface InternalPlugins {
   starred: StarredInternalPlugin;
-  'file-explorer': FileExplorerInternalPlugin;
+  "file-explorer": FileExplorerInternalPlugin;
 }
 
-declare module 'obsidian' {
+declare module "obsidian" {
   interface Workspace {
-    getLeavesOfType(viewType: 'markdown' | 'search' | 'file-explorer'): ExplorerLeaf[];
+    getLeavesOfType(viewType: "markdown" | "search" | "file-explorer"): ExplorerLeaf[];
   }
 
   interface App {
     internalPlugins: {
       plugins: InternalPlugins;
       getPluginById<T extends keyof InternalPlugins>(id: T): InternalPlugins[T];
-      loadPlugin(...args: any[]): any;
+      loadPlugin(...args: unknown[]): unknown;
     };
   }
 }
@@ -64,4 +64,8 @@ interface FileItem {
   file: TAbstractFile;
   titleInnerEl: HTMLDivElement;
   iconWrapper?: HTMLDivElement;
+}
+
+export interface MobileDataAdapter extends DataAdapter {
+  getNativePath(path: string): Promise<string>;
 }
