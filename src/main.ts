@@ -16,7 +16,7 @@ export default class SeafilePlugin extends Plugin {
 
 	async onload() {
 		this.settings = await this.loadSettings();
-		this.server = new Server(this.settings);
+		this.server = new Server(this, this.settings);
 		initConfig(this.app, this.server);
 
 		this.sync = new SyncController(this.app.vault.adapter, this.settings);
@@ -46,14 +46,14 @@ export default class SeafilePlugin extends Plugin {
 
 		if (this.settings.devMode) {
 			(window as any)['seafile'] = this; // for debug
-			this.addRibbonIcon("dice", "Clear Vault", async () => {
+			this.addRibbonIcon("trash-2", "Clear Vault", async () => {
 				await this.clearVault();
 			});
-			this.addRibbonIcon("dice", "Start Sync", async () => {
+			this.addRibbonIcon("play-circle", "Start Sync", async () => {
 				await this.sync.startSync();
 			});
 
-			this.addRibbonIcon("dice", "Stop Sync", async () => {
+			this.addRibbonIcon("stop-circle", "Stop Sync", async () => {
 				await this.sync.stopSyncAsync();
 			});
 		}

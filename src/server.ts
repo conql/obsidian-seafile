@@ -2,11 +2,10 @@ import { requestUrl, RequestUrlParam, RequestUrlResponse, RequestUrlResponseProm
 import pRetry from "p-retry";
 import pThrottle from "p-throttle";
 import pTimeout from "p-timeout";
+import SeafilePlugin from "./main";
 import { SeafileSettings } from "./settings";
 import * as utils from "./utils";
 const pako = require('pako');
-const manifestJson = require('../manifest.json') ?? { id: "seafile", version: "0.0.0" };
-
 
 export const ZeroFs = "0000000000000000000000000000000000000000";
 export type SeafFs = FileSeafFs | DirSeafFs;
@@ -121,7 +120,8 @@ export type CommitChanges = {
 };
 
 export default class Server {
-    public constructor(private settings: SeafileSettings
+    public constructor(private settings: SeafileSettings,
+        private plugin: SeafilePlugin
     ) {
     }
 
@@ -410,7 +410,7 @@ export default class Server {
             repo_name: this.settings.repoName,
             repo_desc: "",
             device_name: this.settings.deviceName,
-            client_version: `obsidian-seafile_${manifestJson.version}`,
+            client_version: `obsidian-seafile_${this.plugin.manifest.version}`,
             version: 1
         };
         const commit_id = await utils.computeCommitId(commit);
