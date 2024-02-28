@@ -6,15 +6,13 @@ This is an Obsidian plugin designed to synchronize notes across devices using Se
 
 ![obsidian-seafile-demo](https://github.com/conql/obsidian-seafile/assets/49243542/5b8ac9aa-4180-4ca4-9abe-0b94134fd0c1)
 
+### What is Seafile?
+- [Seafile](https://www.seafile.com/) is an open source, self-hosted file sync and share solution with high performance and reliability. It supports efficient synchronization through delta downloads and uploads. And provide user-friendly web UI and excellent syncing clients across multiple operating systems.
+
 ### Features
 - Supports both desktop and mobile.
 - Utilizes Seafile's internal syncing API for full synchronization functionality.
 - Fast sync speed, performs well even on low-end Android phones.
-
-#### Why Seafile?
-- Git-like system with file versioning.
-- Efficient synchronization through delta downloads and uploads.
-- User-friendly web UI and excellent syncing clients across multiple operating systems.
 
 ## Usage
 <img src="https://github.com/conql/obsidian-seafile/assets/49243542/26399e88-d054-41cf-ae19-7bc82b178522" width="300">
