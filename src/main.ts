@@ -14,7 +14,7 @@ export default class SeafilePlugin extends Plugin {
 	sync: SyncController;
 	explorerView: Explorer;
 
-	async onload (): Promise<void> {
+	async onload(): Promise<void> {
 		this.settings = await this.loadSettings();
 		this.server = new Server(this.settings, this);
 		initConfig(this.app, this.server);
@@ -70,18 +70,22 @@ export default class SeafilePlugin extends Plugin {
 		}
 	}
 
-	async disableSync (): Promise<void> {
+	async disableSync(): Promise<void> {
+		this.settings.enableSync = false;
+		await this.saveSettings();
 		if (this.sync.status.type === "stop") return;
 		await this.sync.stopSyncAsync();
 	}
 
-	async enableSync (): Promise<void> {
+	async enableSync(): Promise<void> {
+		this.settings.enableSync = true;
+		await this.saveSettings();
 		if (this.sync.status.type !== "stop") return;
 		await this.sync.init();
 		this.sync.startSync();
 	}
 
-	checkSyncReady (): boolean {
+	checkSyncReady(): boolean {
 		const settings = this.settings;
 		if (settings.authToken && settings.repoId) {
 			return true;
@@ -89,12 +93,12 @@ export default class SeafilePlugin extends Plugin {
 		return false;
 	}
 
-	async clearVault (): Promise<void> {
+	async clearVault(): Promise<void> {
 		const clearNotice = new Notice("Clearing vault, please wait...", 0);
 		const waitForStopNotice = new Notice("Waiting for syncing to stop", 0);
 
 		try {
-			await this.sync.stopSyncAsync();
+			await this.disableSync();
 		} finally {
 			waitForStopNotice.hide();
 		}
@@ -143,18 +147,18 @@ export default class SeafilePlugin extends Plugin {
 		}
 	}
 
-	onunload (): void {
+	onunload(): void {
 		if (this.sync) {
 			void this.sync.stopSyncAsync();
 		}
 	}
 
-	async loadSettings (): Promise<SeafileSettings> {
+	async loadSettings(): Promise<SeafileSettings> {
 		const settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		return settings;
 	}
 
-	async saveSettings (settings: SeafileSettings = this.settings): Promise<void> {
+	async saveSettings(settings: SeafileSettings = this.settings): Promise<void> {
 		this.settings = settings;
 		await this.saveData(settings);
 	}

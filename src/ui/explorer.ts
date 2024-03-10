@@ -1,4 +1,4 @@
-import { setIcon } from "obsidian";
+import { setIcon, setTooltip } from "obsidian";
 import { ExplorerLeaf, FileItem } from "src/@types/obsidian";
 import SeafilePlugin from "src/main";
 import { SyncController, SyncStatus } from "src/sync/controller";
@@ -26,7 +26,8 @@ export class Explorer {
 	private statusContainter: HTMLElement;
 	private statusText: HTMLElement;
 	private statusIcon: HTMLElement;
-	private isStatusSynced = false;
+	private isRootNodeSynced = false;
+	private isStatusIdle = false;
 
 	private async registerFileExplorer() {
 		// Find the file explorer
@@ -90,9 +91,13 @@ export class Explorer {
 			this.statesBuffer.set(path, node.state);
 		}
 
-		// Update status if files modified
-		if (path === "/" && node.state.type === "init" && this.statusIcon && this.isStatusSynced) {
-			setIcon(this.statusIcon, "refresh-cw");
+		// Update isRootNodeSynced
+		if (path === "/") {
+			this.isRootNodeSynced = node.state.type === "sync";
+
+			if (!this.isRootNodeSynced && this.isStatusIdle) {
+				this.setStatus("history", "Pending sync");
+			}
 		}
 	}
 
@@ -127,32 +132,46 @@ export class Explorer {
 		else if (state.type === "download") {
 			setIcon(wrapper, "download-cloud");
 		}
-		else if (state.type === "delete"){
+		else if (state.type === "delete") {
 			// don't show delete: may be overwrite rename if delete is delayed after create event
 		}
 		wrapper.setAttribute("state", state.type);
+	}
+
+	setStatus(icon: string, text: string) {
+		setIcon(this.statusIcon, icon);
+		setTooltip(this.statusIcon, text, { placement: "right" });
 	}
 
 	syncStatusChanged(status: SyncStatus): void {
 		if (!this.statusIcon) return;
 
 		if (status.type == "idle") {
-			setIcon(this.statusIcon, "check");
-			this.isStatusSynced = true;
+			this.isStatusIdle = true;
+			if (this.isRootNodeSynced) {
+				this.setStatus("check", "Synced");
+			}
+			else {
+				this.setStatus("history", "Pending sync");
+			}
 		}
 		else if (status.type == "busy") {
-			if (status.message == "fetch" || status.message == "download")
-				setIcon(this.statusIcon, "download-cloud");
-			else if (status.message == "upload")
-				setIcon(this.statusIcon, "upload-cloud");
+			if (status.message == "fetch" || status.message == "download") {
+				this.setStatus("download-cloud", "Downloading");
+			}
+			else if (status.message == "upload") {
+				this.setStatus("upload-cloud", "Uploading");
+			}
 		}
 		else if (status.type == "stop") {
-			if (status.message == "error")
-				setIcon(this.statusIcon, "alert-circle");
-			else
-				setIcon(this.statusIcon, "refresh-cw-off");
+			if (status.message == "error") {
+				this.setStatus("alert-circle", "Error");
+			}
+			else {
+				this.setStatus("refresh-cw-off", "Sync stopped");
+			}
 		}
-		else{
+		else {
 			throw new Error("Invalid sync status type");
 		}
 	}

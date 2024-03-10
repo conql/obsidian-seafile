@@ -6,11 +6,11 @@ import LoginModal from "./login_modal";
 import RepoModal from "./repo_modal";
 
 export class SeafileSettingTab extends PluginSettingTab {
-	constructor (public app: App, private readonly plugin: SeafilePlugin) {
+	constructor(public app: App, private readonly plugin: SeafilePlugin) {
 		super(app, plugin);
 	}
 
-	display (): void {
+	display(): void {
 		const settings = this.plugin.settings;
 		const { containerEl } = this;
 		containerEl.empty();
@@ -113,17 +113,16 @@ export class SeafileSettingTab extends PluginSettingTab {
 					}).open();
 				});
 			});
+		let enableSyncButton: ButtonComponent;
 		const enableSyncSetting = new Setting(containerEl)
 			.setName("Sync status")
 			.setDesc(settings.enableSync ? "Enabled" : "Disabled")
 			.addButton(button => {
+				enableSyncButton = button;
 				button.setButtonText(settings.enableSync ? "Disable" : "Enable");
 				button.onClick(async () => {
 					button.setDisabled(true);
 					if (settings.enableSync) {
-						settings.enableSync = false;
-						await this.plugin.saveSettings();
-
 						// Disable sync
 						await this.plugin.disableSync();
 						new Notice("Sync disabled");
@@ -132,9 +131,6 @@ export class SeafileSettingTab extends PluginSettingTab {
 					} else {
 						// Enable sync
 						if (this.plugin.checkSyncReady()) {
-							settings.enableSync = true;
-							await this.plugin.saveSettings();
-
 							await this.plugin.enableSync();
 							new Notice("Sync enabled");
 							button.setButtonText("Disable");
@@ -216,12 +212,17 @@ export class SeafileSettingTab extends PluginSettingTab {
 				.setButtonText("Clear")
 				.setWarning()
 				.onClick(async () => {
-					await this.askClearVault();
+					const success = await this.askClearVault();
+					if (success) {
+						// Sync has been disabled, update the UI
+						enableSyncSetting.setDesc("Disabled");
+						enableSyncButton.setButtonText("Enable");
+					}
 				})
 			);
 	}
 
-	private async askClearVault (info: string = ""): Promise<boolean> {
+	private async askClearVault(info: string = ""): Promise<boolean> {
 		return await new Promise<boolean>((resolve) => {
 			new Dialog(this.app,
 				"Clear vault",

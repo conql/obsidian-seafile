@@ -4,25 +4,25 @@ import * as utils from "../utils";
 import { debug } from "../utils";
 
 export type STATE_DOWNLOAD = {
-    type: "download",
-    param: number
+	type: "download",
+	param: number
 }
 export type STATE_UPLOAD = {
-    type: "upload",
-    param: {
-        progress: number,
-        fs: SeafFs | null,
-        blocks?: Record<string, ArrayBuffer>
-    }
+	type: "upload",
+	param: {
+		progress: number,
+		fs: SeafFs | null,
+		blocks?: Record<string, ArrayBuffer>
+	}
 }
 export type STATE_SYNC = {
-    type: "sync"
+	type: "sync"
 }
 export type STATE_INIT = {
-    type: "init"
+	type: "init"
 }
 export type STATE_DELETE = {
-    type: "delete"
+	type: "delete"
 }
 
 export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC | STATE_DELETE;
@@ -30,8 +30,8 @@ export type SyncState = STATE_INIT | STATE_DOWNLOAD | STATE_UPLOAD | STATE_SYNC 
 export type SyncStateChangedListener = (node: SyncNode) => void;
 
 export type SerializedSyncNode = {
-    prev: SeafDirent | null,
-    children: Record<string, SerializedSyncNode>
+	prev: SeafDirent | null,
+	children: Record<string, SerializedSyncNode>
 }
 
 export type SerializedLogData = [string, SeafDirent | null];
@@ -50,8 +50,8 @@ export class SyncNode {
 	public nextDirty = true; // next means the pending upload state
 
 	private constructor(
-        public readonly name: string,
-        public readonly parent?: SyncNode,
+		public readonly name: string,
+		public readonly parent?: SyncNode,
 	) {
 		this.path = this.parent ? this.parent.path + "/" + this.name : this.name;
 		this.state = { type: "init" };
@@ -143,7 +143,7 @@ export class SyncNode {
 					if (!Object.prototype.hasOwnProperty.call(base.children, part)) {
 						base.children[part] = { prev: null, children: {} };
 					}
-					base = base.children[part]; 
+					base = base.children[part];
 				}
 				if (dirent) {
 					if (name === "")
@@ -240,7 +240,9 @@ export class SyncNode {
 			if (node.next) {
 				node.nextDirty = true;
 			}
-			node.state = { "type": "init" };
+			else {
+				node.state = { "type": "init" };
+			}
 
 			return false;
 		}, "post", false);
@@ -296,6 +298,9 @@ export class SyncNode {
 		this.setNext(undefined, true);
 		if (!this.prevDirty) {
 			this.state = { "type": "sync" };
+		}
+		else {
+			this.state = { "type": "init" };
 		}
 	}
 

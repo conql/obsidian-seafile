@@ -6,12 +6,12 @@ export class FormData {
 	private readonly boundary: string;
 	private readonly data: unknown[];
 
-	constructor () {
+	constructor() {
 		this.boundary = crypto.randomUUID();
 		this.data = [];
 	}
 
-	append (name: string, value: string | ArrayBuffer | Buffer, filename?: string): void {
+	append(name: string, value: string | ArrayBuffer | Buffer, filename?: string): void {
 		if (this.data.length > 0) {
 			this.data.push("\r\n");
 		}
@@ -25,19 +25,19 @@ export class FormData {
 		this.data.push(value);
 	}
 
-	async getArrayBuffer (): Promise<ArrayBuffer> {
+	async getArrayBuffer(): Promise<ArrayBuffer> {
 		this.data.push(`\r\n--${this.boundary}--\r\n`);
 		return await new Blob(this.data as BlobPart[]).arrayBuffer();
 	}
 
-	getContentType (): string {
+	getContentType(): string {
 		return `multipart/form-data; boundary=${this.boundary}`;
 	}
 }
 
 // Memoize function with a limit on the cache size
 type Func<T extends unknown[], V> = (...args: [...T]) => Promise<V>
-export function memoizeWithLimit<T extends unknown[], V> (fn: Func<T, V>, cacheLimit: number): Func<T, V> {
+export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLimit: number): Func<T, V> {
 	const cache = new Map<string, V | Promise<V>>(); let cacheSize = 0;
 	const keysQueue = new Set<string>();
 
@@ -138,11 +138,11 @@ export function packRequest<FuncParamType, FuncRetType>
 	};
 }
 
-export function strcmp (str1: string, str2: string) {
+export function strcmp(str1: string, str2: string) {
 	return ((str1 == str2) ? 0 : ((str1 > str2) ? 1 : -1));
 }
 
-export async function sha1 (data: ArrayBuffer | string) {
+export async function sha1(data: ArrayBuffer | string) {
 	if (typeof data === "string") {
 		data = new TextEncoder().encode(data);
 	}
@@ -152,20 +152,20 @@ export async function sha1 (data: ArrayBuffer | string) {
 	});
 }
 
-export function stringifySeafFs (fs: SeafFs): string {
+export function stringifySeafFs(fs: SeafFs): string {
 	// Stringify, add one space after colons and commas
 	let str = JSON.stringify(fs, null, "/");
 	str = str.replace(/\//g, "").replace(/,\n/g, ", ").replace(/\n/g, "");
 	return str;
 }
 
-export async function computeFsId (fs: SeafFs): Promise<string> {
+export async function computeFsId(fs: SeafFs): Promise<string> {
 	const str = stringifySeafFs(fs);
 	const fsId = await sha1(str);
 	return fsId;
 }
 
-export async function computeCommitId (commit: Commit): Promise<string> {
+export async function computeCommitId(commit: Commit): Promise<string> {
 	const encoder = new TextEncoder();
 
 	const rootIdBytes = encoder.encode(commit.root_id + "\0");
@@ -188,7 +188,7 @@ export async function computeCommitId (commit: Commit): Promise<string> {
 	return commitId;
 }
 
-export async function computeBlocks (buffer: ArrayBuffer): Promise<Record<string, ArrayBuffer>> {
+export async function computeBlocks(buffer: ArrayBuffer): Promise<Record<string, ArrayBuffer>> {
 	const size = buffer.byteLength;
 
 	const blocks: Record<string, ArrayBuffer> = {};
@@ -204,7 +204,7 @@ export async function computeBlocks (buffer: ArrayBuffer): Promise<Record<string
 }
 
 // Faster way to convert an array buffer to a base64 string
-export async function arrayBufferToBase64 (buffer: ArrayBuffer): Promise<string> {
+export async function arrayBufferToBase64(buffer: ArrayBuffer): Promise<string> {
 	return await new Promise<string>((resolve, reject) => {
 		const blob = new Blob([buffer], { type: "application/octet-binary" });
 		const fileReader = new FileReader();
@@ -218,14 +218,14 @@ export async function arrayBufferToBase64 (buffer: ArrayBuffer): Promise<string>
 	});
 }
 
-export function concatTypedArrays (a: Uint8Array, b: Uint8Array): Uint8Array {
+export function concatTypedArrays(a: Uint8Array, b: Uint8Array): Uint8Array {
 	const result = new Uint8Array(a.length + b.length);
 	result.set(a, 0);
 	result.set(b, a.length);
 	return result;
 }
 
-export function splitFirstSlash (path: string): [string, string] {
+export function splitFirstSlash(path: string): [string, string] {
 	const firstSlash = path.indexOf("/");
 	if (firstSlash === -1) return [path, ""];
 	const [first, rest] = [path.slice(0, firstSlash), path.slice(firstSlash + 1)];
@@ -240,14 +240,14 @@ for (key in console) {
 	}
 }
 
-export function disableDebugConsole (): void {
+export function disableDebugConsole(): void {
 	let key: keyof Console;
 	for (key in debug) {
 		debug[key] = (() => { }) as any;
 	}
 }
 
-export function isHiddenPath (path: string): boolean {
+export function isHiddenPath(path: string): boolean {
 	const parts = path.split("/");
 	for (const part of parts) {
 		if (part.startsWith(".")) return true;
@@ -255,7 +255,7 @@ export function isHiddenPath (path: string): boolean {
 	return false;
 }
 
-export async function fastStat (path: string): Promise<Stat | null> {
+export async function fastStat(path: string): Promise<Stat | null> {
 	while (path.startsWith("/")) path = path.slice(1);
 	while (path.endsWith("/")) path = path.slice(0, -1);
 	if (path === "") path = "/";
