@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is an ![Obsidian](https://obsidian.md/) plugin designed to synchronize notes across devices using Seafile.
+This is an [Obsidian](https://obsidian.md/) plugin designed to synchronize notes across devices using Seafile.
 
 ![obsidian-seafile-demo](https://github.com/conql/obsidian-seafile/assets/49243542/5b8ac9aa-4180-4ca4-9abe-0b94134fd0c1)
 
@@ -32,7 +32,7 @@ For each individual file, the syncing status will be displayed next to file name
 3. **No large files:** Due to limitations of Obsidian's API, downloading or uploading large files (e.g., larger than 50MB) *may take a long time or cause the app to crash*. Please do not use the plugin for files that are too large.
 4. **Clear vault:** If you encounter any problems, you could try to *Clear vault* and restart syncing.
 5. **Don't interrupt:** Do not close Obsidian while syncing, especially when uploading data to the server (an upload icon will be shown). Otherwise, expect data corruption or loss.
-
+6. **Hidden files**: Limited by the API, hideen files and folders (name starting with dot, e.g. ".obsidian") will not be tracked. They are only updated at plugin startup.
 ## Contribution & Support
 
 Your feedback and suggestions are highly appreciated. If you want to:
