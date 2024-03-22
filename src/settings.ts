@@ -11,6 +11,7 @@ export interface SeafileSettings {
   ignore: string
   devMode: boolean
   enableSync: boolean
+  useFetch: boolean
 }
 
 export const DEFAULT_SETTINGS: SeafileSettings = {
@@ -25,5 +26,6 @@ export const DEFAULT_SETTINGS: SeafileSettings = {
 	interval: 30000,
 	ignore: "",
 	devMode: false,
-	enableSync: false
+	enableSync: false,
+	useFetch: false,
 };

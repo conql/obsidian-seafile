@@ -206,6 +206,16 @@ export class SeafileSettingTab extends PluginSettingTab {
 				})
 			);
 		new Setting(containerEl)
+			.setName("Use fetch")
+			.setDesc("Use fetch instead of Obsidian API. Need CORS enabled on the server.")
+			.addToggle(toggle => toggle
+				.setValue(settings.useFetch)
+				.onChange(async (value) => {
+					settings.useFetch = value;
+					await this.plugin.saveSettings();
+				})
+			);
+		new Setting(containerEl)
 			.setName("Clear vault")
 			.setDesc("Delete all local files and data. Try this if you encounter any issues.")
 			.addButton(button => button

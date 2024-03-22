@@ -1,4 +1,4 @@
-import { requestUrl, type RequestUrlParam, type RequestUrlResponse, type RequestUrlResponsePromise } from "obsidian";
+import { requestUrl, type RequestUrlParam } from "obsidian";
 import pRetry from "p-retry";
 import pThrottle from "p-throttle";
 import pTimeout from "p-timeout";
@@ -127,10 +127,33 @@ export default class Server {
 	}
 
 	private async request (req: RequestUrlParam & RequestParam) {
-		return await (pTimeout(requestUrl(req), { milliseconds: 120 * 1000 }) as unknown as RequestUrlResponsePromise);
+		if(!this.settings.useFetch)
+		{
+			const response = await pTimeout(requestUrl(req), { milliseconds: 120 * 1000 });
+			return {
+				status: response.status,
+				text: async () => await response.text,
+				json: async () => await response.json,
+				arrayBuffer: async () => await response.arrayBuffer
+			};
+		}
+		else
+		{
+			const response = await fetch(req.url, {
+				method: req.method,
+				headers: req.headers,
+				body: req.body,
+			});
+			return {
+				status: response.status,
+				text: async () => await response.text(),
+				json: async () => await response.json(),
+				arrayBuffer: async () => await response.arrayBuffer()
+			};
+		}
 	}
 
-	private readonly requestThrottled = pThrottle({ interval: 1000, limit: 15 })(this.request);
+	private readonly requestThrottled = pThrottle({ interval: 100, limit: 5 })(this.request);
 	private async sendRequest (param: RequestParam) {
 		const req: RequestUrlParam & RequestParam = { ...param };
 		req.throw = false;
@@ -142,11 +165,11 @@ export default class Server {
 		let ret = null;
 
 		if (req.responseType === "text") {
-			ret = await resp.text;
+			ret = await resp.text();
 		} else if (req.responseType === "binary") {
-			ret = await resp.arrayBuffer;
+			ret = await resp.arrayBuffer();
 		} else {
-			ret = await resp.json;
+			ret = await resp.json();
 			if (ret.error_msg) { throw new Error(ret.error_msg); }
 		}
 
@@ -206,7 +229,7 @@ export default class Server {
 			}
 		}
 
-		const data = await resp.json;
+		const data = await resp.json();
 		return data.token;
 	}
 
@@ -242,7 +265,7 @@ export default class Server {
 	async getFileContent (remotePath: string): Promise<ArrayBuffer> {
 		const fileDownloadLink = await this.getFileDownloadLink(remotePath);
 		const downloadResp = await this.request({ url: fileDownloadLink, method: "GET", responseType: "binary", throw: false });
-		return downloadResp.arrayBuffer;
+		return downloadResp.arrayBuffer();
 	}
 
 	async renameFile (oldPath: string, newName: string) {
@@ -322,7 +345,7 @@ export default class Server {
 		return resp;
 	}
 
-	public async uploadFile (remotePath: string, content: ArrayBuffer, exists: boolean): Promise<RequestUrlResponse> {
+	public async uploadFile (remotePath: string, content: ArrayBuffer, exists: boolean) {
 		const baseDir = Path.dirname(remotePath);
 		const fileName = Path.basename(remotePath);
 
@@ -367,7 +390,6 @@ export default class Server {
 		if (response.status != 200) {
 			throw new Error("Upload error. " + response.text);
 		}
-		return response;
 	}
 
 	async getHeadCommitId (): Promise<string> {

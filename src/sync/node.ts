@@ -1,5 +1,5 @@
 import { adapter, SYNC_DATA_PATH, SYNC_DLOG_PATH } from "../config";
-import { MODE_FILE, SeafDirent, SeafFs } from "../server";
+import { SeafDirent, SeafFs } from "../server";
 import * as utils from "../utils";
 import { debug } from "../utils";
 
@@ -92,7 +92,7 @@ export class SyncNode {
 		for (const [name, childData] of Object.entries(data.children)) {
 			await this.deserialize(name, childData, node);
 		}
-		
+
 		return node;
 	}
 
