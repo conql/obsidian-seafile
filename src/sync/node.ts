@@ -89,41 +89,10 @@ export class SyncNode {
 		node.prev = data.prev ?? undefined;
 		parent?.addChild(node);
 
-		if (!node.prev) {
-			debug.log(`Path '${node.path}' has no prev.`);
-			const stat = await utils.fastStat(node.path);
-			if (!stat) {
-				node.prev = undefined;
-				node.prevDirty = false;
-				node.state = { "type": "delete" };
-			}
+		for (const [name, childData] of Object.entries(data.children)) {
+			await this.deserialize(name, childData, node);
 		}
-		else if (node.prev.mode === MODE_FILE) {
-			const stat = await utils.fastStat(node.path);
-			if (stat && Math.floor(stat.mtime / 1000) == node.prev.mtime && stat.size == node.prev.size) {
-				node.prevDirty = false;
-				node.state = { "type": "sync" };
-			}
-		}
-		else {
-			let childrenDirty = false;
-			const localChildren = await utils.fastList(node.path);
-			for(const name of localChildren){
-				if (!Object.prototype.hasOwnProperty.call(data.children, name)) {
-					data.children[name] = { prev: null, children: {} };
-				}
-			}
-			for (const [name, childData] of Object.entries(data.children)) {
-				const child = await SyncNode.deserialize(name, childData, node);
-				if (child.prevDirty) childrenDirty = true;
-
-			}
-			if (!childrenDirty) {
-				node.prevDirty = false;
-				node.state = { "type": "sync" };
-			}
-		}
-
+		
 		return node;
 	}
 
