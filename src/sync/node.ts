@@ -107,9 +107,16 @@ export class SyncNode {
 		}
 		else {
 			let childrenDirty = false;
+			const localChildren = await utils.fastList(node.path);
+			for(const name of localChildren){
+				if (!Object.prototype.hasOwnProperty.call(data.children, name)) {
+					data.children[name] = { prev: null, children: {} };
+				}
+			}
 			for (const [name, childData] of Object.entries(data.children)) {
 				const child = await SyncNode.deserialize(name, childData, node);
 				if (child.prevDirty) childrenDirty = true;
+
 			}
 			if (!childrenDirty) {
 				node.prevDirty = false;
@@ -129,6 +136,7 @@ export class SyncNode {
 		let logData = [] as string[];
 		try {
 			logData = (await adapter.read(SYNC_DLOG_PATH)).split("\n");
+			this.dataLogCount = logData.length;
 		} catch { /* empty */ }
 
 		for (const line of logData) {

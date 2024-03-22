@@ -2,7 +2,7 @@ import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
 import fs from "fs-extra";
-import CssModulesPlugin from 'esbuild-css-modules-plugin';
+import CssModulesPlugin from "esbuild-css-modules-plugin";
 
 const banner =
 	`/*
@@ -59,7 +59,7 @@ const context = await esbuild.context({
 						appSettings = JSON.parse(fs.readFileSync("vault/.obsidian/plugins/seafile/data.json", "utf-8"));
 					fs.rmSync("dist", { recursive: true, force: true });
 				});
-				build.onEnd(async result => {
+				build.onEnd(async () => {
 					// Copy dist/src folder to dist/ folder
 					fs.copySync("dist/src", "dist");
 					fs.rmSync("dist/src", { recursive: true, force: true });
@@ -73,8 +73,8 @@ const context = await esbuild.context({
 
 					// Copy dist folder to test vault
 					const testVaultPath = "vault/.obsidian/plugins/seafile";
-					if (fs.existsSync(testVaultPath))
-						fs.rmSync(testVaultPath, { recursive: true, force: true });
+					// if (fs.existsSync(testVaultPath))
+					// fs.rmSync(testVaultPath, { recursive: true, force: true });
 					fs.copySync("dist", testVaultPath);
 					fs.writeFileSync(testVaultPath + "/data.json", JSON.stringify(appSettings));
 				});

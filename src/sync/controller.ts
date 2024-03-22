@@ -193,8 +193,7 @@ export class SyncController {
 		const newRemote: Record<string, SeafDirent> = {};
 
 		if ((target == "local" || target == "merge") && local && local.type == "folder") {
-			const fileList = await this.adapter.list(path);
-			const list = [...fileList.files, ...fileList.folders].map(abs => Path.basename(abs));
+			const list = await utils.fastList(path);
 			if (!newChildrenNames) newChildrenNames = new Set();
 			for (const name of list) {
 				newChildrenNames.add(name);

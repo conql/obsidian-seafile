@@ -1,5 +1,6 @@
-import { arrayBufferToHex, type Stat, TFile } from "obsidian";
+import { arrayBufferToHex, type Stat, TFile, TFolder } from "obsidian";
 import pThrottle from "p-throttle";
+import { posix as Path } from "path-browserify";
 import { type Commit, type SeafFs } from "./server";
 import * as config from "./config";
 export class FormData {
@@ -271,5 +272,26 @@ export async function fastStat(path: string): Promise<Stat | null> {
 		return await config.app.vault.adapter.stat(path);
 	} else {
 		return null;
+	}
+}
+
+export async function fastList(path: string): Promise<string[]> {
+	while (path.startsWith("/")) path = path.slice(1);
+	while (path.endsWith("/")) path = path.slice(0, -1);
+	// if (path === "") path = "/";
+	// For root folder, force to use adapter.list to scan for .obsidian like folder
+
+	const absFile = config.app.vault.getAbstractFileByPath(path);
+	if (absFile) {
+		if( absFile instanceof TFolder){
+			return absFile.children.map(child => child.name);
+		}
+		else{
+			return [];
+		}
+	} else {
+		const listed = await config.app.vault.adapter.list(path);
+		const concated = listed.files.concat(listed.folders);
+		return concated.map(p => Path.basename(p));
 	}
 }
