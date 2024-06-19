@@ -20,7 +20,7 @@ This is an [Obsidian](https://obsidian.md/) plugin designed to synchronize notes
 1. Open settings.
 2. Enter the URL of your server and log into your Seafile account.
 3. Choose the repository you want to sync.
-4. *Optional*: Specify the files you want to ignore. This uses [gitignore syntax](https://git-scm.com/docs/gitignore). The path to the plugin itself and Obsidian configurations are prepended to the user-defined ignore list.
+4. *Optional*: Specify the files you want to ignore. The pattern format loosely follows [gitignore syntax](https://git-scm.com/docs/gitignore). Test your pattern before using it. The path to the plugin itself and Obsidian configurations are prepended to the user-defined ignore list.
 5. Click "Enable" to start syncing.
 6. The plugin will now sync your files at intervals. 
 
