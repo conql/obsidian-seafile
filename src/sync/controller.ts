@@ -331,7 +331,7 @@ export class SyncController {
 		const stat = await utils.fastStat(path);
 		if (!stat) throw new Error("Cannot compute fs of non-existent file");
 
-		const blockBuffer: Record<string, ArrayBuffer> = {};
+		let blockBuffer: Record<string, ArrayBuffer> = {};
 		let fsId: string, fs: SeafFs | null;
 
 		if (stat.size == 0) {
@@ -339,17 +339,10 @@ export class SyncController {
 		} else {
 			// to do: warn if file too large
 			const buffer = await this.adapter.readBinary(path);
-			const blocks: Record<string, ArrayBuffer> = await utils.computeBlocks(buffer);
-
-			const entries = Object.entries(blocks);
-			if (entries.length == 1) {
-				const [blockId, block] = entries[0] as [string, ArrayBuffer];
-				// if only one block and it is smaller than 32kb, we put it in buffer
-				if (block.byteLength < 32 * 1024) { blockBuffer[blockId] = block; }
-			}
+			blockBuffer = await utils.computeBlocks(buffer);
 
 			fs = {
-				block_ids: Object.keys(blocks),
+				block_ids: Object.keys(blockBuffer),
 				size: stat.size,
 				type: 1,
 				version: 1
