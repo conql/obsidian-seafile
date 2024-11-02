@@ -1,4 +1,4 @@
-import { arrayBufferToHex, type Stat, TFile, TFolder } from "obsidian";
+import { App, arrayBufferToHex, Plugin, type Stat, TFile, TFolder } from "obsidian";
 import pThrottle from "p-throttle";
 import { posix as Path } from "path-browserify";
 import { type Commit, type SeafFs } from "./server";
@@ -81,10 +81,10 @@ export function memoizeWithLimit<T extends unknown[], V>(fn: Func<T, V>, cacheLi
 
 // Pack multiple requests into a single request
 export function packRequest<FuncParamType, FuncRetType>
-(
-	packFunc: (funcParamArray: FuncParamType[]) => Promise<Map<FuncParamType, FuncRetType>>,
-	limit: number, interval: number, batchSize: number
-): (key: FuncParamType) => Promise<FuncRetType> {
+	(
+		packFunc: (funcParamArray: FuncParamType[]) => Promise<Map<FuncParamType, FuncRetType>>,
+		limit: number, interval: number, batchSize: number
+	): (key: FuncParamType) => Promise<FuncRetType> {
 	interface callback { resolve: (value: FuncRetType) => void, reject: (reason: unknown) => void }
 	const taskQueue = new Map<FuncParamType, Array<{ callback: callback, stack: string }>>();
 	const throttled = pThrottle({ limit, interval })(async () => {
@@ -283,10 +283,10 @@ export async function fastList(path: string): Promise<string[]> {
 
 	const absFile = config.app.vault.getAbstractFileByPath(path);
 	if (absFile) {
-		if( absFile instanceof TFolder){
+		if (absFile instanceof TFolder) {
 			return absFile.children.map(child => child.name);
 		}
-		else{
+		else {
 			return [];
 		}
 	} else {
