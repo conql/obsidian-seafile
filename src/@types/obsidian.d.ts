@@ -20,7 +20,9 @@ interface StarredInternalPlugin extends InternalPlugin {
   };
 }
 
-type FileExplorerInternalPlugin = InternalPlugin
+interface FileExplorerInternalPlugin extends InternalPlugin {
+  views: { "file-explorer": Function };
+}
 
 interface InternalPlugins {
   starred: StarredInternalPlugin;
@@ -37,6 +39,9 @@ declare module "obsidian" {
       plugins: InternalPlugins;
       getPluginById<T extends keyof InternalPlugins>(id: T): InternalPlugins[T];
       loadPlugin(...args: unknown[]): unknown;
+    };
+    viewRegistry: {
+      viewByType: Record<string, Function>;
     };
   }
 }

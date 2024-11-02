@@ -38,8 +38,18 @@ export class Explorer {
 		}
 		this.fileExplorer = fileExplorers[0];
 
+		// Wait till file items loaded
+		await new Promise<void>((resolve) => {
+			const id = this.plugin.registerInterval(window.setInterval(() => {
+				this.fileItems = this.fileExplorer.view.fileItems;
+				if (this.fileItems) {
+					window.clearInterval(id);
+					resolve();
+				}
+			}, 100));
+		});
+
 		// Register file items
-		this.fileItems = this.fileExplorer.view.fileItems;
 		this.fileExplorer.view.fileItems = new Proxy(this.fileItems, {
 			set: (target: Record<string, FileItem>, prop: string | symbol, value: FileItem): boolean => {
 				const ret = Reflect.set(target, prop, value);
