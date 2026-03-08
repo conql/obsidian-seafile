@@ -292,8 +292,8 @@ export default class Server {
 	}
 
 	async renameFile (oldPath: string, newName: string) {
-		// oldPath = encodeURIComponent(oldPath);
-		// newName = encodeURIComponent(newName);
+		oldPath = encodeURIComponent(oldPath);
+		newName = encodeURIComponent(newName);
 		const resp = await this.requestAPIv20(
 			{
 				url: `repos/${this.settings.repoId}/file/?p=${oldPath}`,
