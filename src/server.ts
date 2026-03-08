@@ -220,12 +220,17 @@ export default class Server {
 			params.append("otp_token", otpToken);
 		}
 
+		const headers: Record<string, string> = {
+			"Content-Type": "application/x-www-form-urlencoded"
+		};
+		if (otpToken) {
+			headers["X-Seafile-OTP"] = otpToken;
+		}
+
 		const resp = await pTimeout(this.request({
 			url: `${this.settings.host}/api2/auth-token/`,
 			method: "POST",
-			headers: {
-				"Content-Type": "application/x-www-form-urlencoded"
-			},
+			headers,
 			body: params.toString(),
 			throw: false
 		}), { milliseconds: 10 * 1000 });
@@ -234,7 +239,11 @@ export default class Server {
 			if (resp.status == 400) {
 				const data = await resp.json();
 				const errors: string[] = data.non_field_errors || [];
-				if (errors.some((e) => e.toLowerCase().includes("two factor"))) {
+				const isMfaError = errors.some((e) => {
+					const msg = e.toLowerCase();
+					return msg.includes("two factor") || msg.includes("otp");
+				});
+				if (isMfaError) {
 					throw new MfaRequiredError();
 				}
 				throw new Error("Failed to get auth token. Invalid username or password.");
