@@ -1,4 +1,4 @@
-import { App, arrayBufferToHex, ButtonComponent, Modal, Notice, Setting } from "obsidian";
+import { App, arrayBufferToHex, ButtonComponent, Modal, Notice, Setting, TextComponent } from "obsidian";
 import { server } from "src/config";
 import { MfaRequiredError } from "src/server";
 import { debug } from "src/utils";
@@ -8,6 +8,7 @@ export type LoginCallback = (account: string, token: string, deviceName: string,
 export default class LoginModal extends Modal {
 	private deviceName: string = "obsidian-seafile";
 	private otpToken: string = "";
+	private otpTextComponent: TextComponent | null = null;
 	private mfaRequired: boolean = false;
 	private otpSetting: Setting | null = null;
 	private loginButton: ButtonComponent | null = null;
@@ -85,6 +86,7 @@ export default class LoginModal extends Modal {
 			.setName("Two-factor auth token")
 			.setDesc("Enter the code from your authenticator app")
 			.addText(text => {
+				this.otpTextComponent = text;
 				text.setPlaceholder("123456")
 					.onChange(value => {
 						this.otpToken = value;
@@ -101,19 +103,26 @@ export default class LoginModal extends Modal {
 				button.onClick(async () => {
 					if (!this.account || !this.password || !this.deviceName) return;
 					try {
+						const otpValue = this.mfaRequired
+							? (this.otpTextComponent?.getValue() || this.otpToken)
+							: undefined;
 						const result = await this.login(
 							this.account,
 							this.password,
 							this.deviceName,
-							this.mfaRequired ? this.otpToken : undefined
+							otpValue
 						);
 						if (result) this.close();
 					}
 					catch (error) {
 						if (error instanceof MfaRequiredError) {
-							this.mfaRequired = true;
-							this.showMfaField();
-							new Notice("Two-factor authentication required. Please enter your OTP.");
+							if (this.mfaRequired) {
+								new Notice("Incorrect OTP code. Please try again.");
+							} else {
+								this.mfaRequired = true;
+								this.showMfaField();
+								new Notice("Two-factor authentication required. Please enter your OTP.");
+							}
 						} else {
 							new Notice("Login failed: " + error.message);
 							debug.error(error);
