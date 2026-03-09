@@ -120,6 +120,12 @@ export interface CommitChanges {
   renamedDirectories: string[]
 }
 
+export class MfaRequiredError extends Error {
+	constructor() {
+		super("Two-factor authentication token is required.");
+	}
+}
+
 export default class Server {
 	public constructor (private readonly settings: SeafileSettings,
     private readonly plugin: SeafilePlugin
@@ -202,7 +208,7 @@ export default class Server {
 		return await this.sendRequest(req);
 	}
 
-	async getAuthToken (account: string, password: string, deviceName: string, deviceId: string): Promise<string> {
+	async getAuthToken (account: string, password: string, deviceName: string, deviceId: string, otpToken?: string): Promise<string> {
 		const params = new URLSearchParams();
 		params.append("username", account);
 		params.append("password", password);
@@ -210,19 +216,36 @@ export default class Server {
 		params.append("device_id", deviceId);
 		params.append("client_version", "obsidian_plugin");
 		params.append("platform", "windows");
+		if (otpToken) {
+			params.append("otp_token", otpToken);
+		}
+
+		const headers: Record<string, string> = {
+			"Content-Type": "application/x-www-form-urlencoded"
+		};
+		if (otpToken) {
+			headers["X-Seafile-OTP"] = otpToken;
+		}
 
 		const resp = await pTimeout(this.request({
 			url: `${this.settings.host}/api2/auth-token/`,
 			method: "POST",
-			headers: {
-				"Content-Type": "application/x-www-form-urlencoded"
-			},
+			headers,
 			body: params.toString(),
 			throw: false
 		}), { milliseconds: 10 * 1000 });
 
 		if (resp.status != 200) {
 			if (resp.status == 400) {
+				const data = await resp.json();
+				const errors: string[] = data.non_field_errors || [];
+				const isMfaError = errors.some((e) => {
+					const msg = e.toLowerCase();
+					return msg.includes("two factor") || msg.includes("otp");
+				});
+				if (isMfaError) {
+					throw new MfaRequiredError();
+				}
 				throw new Error("Failed to get auth token. Invalid username or password.");
 			} else {
 				throw new Error(`Failed to get auth token. HTTP ${resp.status}`);
@@ -269,8 +292,8 @@ export default class Server {
 	}
 
 	async renameFile (oldPath: string, newName: string) {
-		// oldPath = encodeURIComponent(oldPath);
-		// newName = encodeURIComponent(newName);
+		oldPath = encodeURIComponent(oldPath);
+		newName = encodeURIComponent(newName);
 		const resp = await this.requestAPIv20(
 			{
 				url: `repos/${this.settings.repoId}/file/?p=${oldPath}`,
